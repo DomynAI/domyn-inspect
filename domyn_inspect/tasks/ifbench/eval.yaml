@@ -1,0 +1,19 @@
+title: 'IFBench: Generalizing Verifiable Instruction Following'
+description: |
+  300 prompts with one or more of 58 new, out-of-domain verifiable output constraints (counting, ratios, words,
+  sentences, formats, custom), graded by rule-based checkers at prompt and instruction level, strict and loose.
+arxiv: https://arxiv.org/abs/2507.02833
+group: Reasoning
+version: "2.0.0"
+tasks:
+  - name: ifbench
+    dataset_samples: 300
+  - name: ifbench_pass_k
+    dataset_samples: 300
+external_assets:
+  - type: huggingface
+    source: allenai/IFBench_test
+    fetch_method: hf_dataset
+    state: pinned
+  - type: vendored_code
+    source: https://github.com/allenai/IFBench/tree/1c40f0c10d9b5c5c2f10a175a28007ebb64f7f4d

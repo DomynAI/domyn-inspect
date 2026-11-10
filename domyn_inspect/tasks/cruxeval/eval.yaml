@@ -1,0 +1,17 @@
+title: 'CRUXEval: Code Reasoning, Understanding and Execution'
+description: |
+  800 short Python functions. CRUXEval-O asks for the output of a function on a given input, CRUXEval-I for an input
+  that produces a given output; answers are checked by executing an assertion in a container. Reports pass@k.
+arxiv: https://arxiv.org/abs/2401.03065
+group: Coding
+version: "1.0.0"
+tasks:
+  - name: cruxeval
+    dataset_samples: 800
+external_assets:
+  - type: huggingface
+    source: cruxeval-org/cruxeval
+    fetch_method: hf_dataset
+    state: pinned
+  - type: vendored_code
+    source: https://github.com/facebookresearch/cruxeval/tree/190faf16d175b5847b0af05d937872b1fb395942

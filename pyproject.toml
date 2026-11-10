@@ -1,0 +1,186 @@
+[project]
+name = "domyn-inspect"
+version = "0.1.0"
+description = "inspect-ai evaluation"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "click",
+    "inspect-ai~=0.3.0",
+    "inspect-evals[swe-bench,agentdojo,scicode]==0.22.0",
+    # inspect_evals 0.22's swe_bench scorer imports MAP_REPO_VERSION_TO_SPECS, removed in swebench 5.
+    "swebench>=4.1,<5",
+    "instruction-following-eval",
+    "jinja2",
+    "nltk",
+    "openai>=3.11.0",
+    "datasets",
+    "sympy",
+    "livebench",
+    "lxml",
+    "setuptools<81",
+    "ifbench",  # IFBench checkers (custom/ifbench)
+    "ifstruct",  # IFStruct validator (custom/ifstruct)
+    "en-core-web-sm",
+    "jiter",
+    "charset-normalizer==3.4.6",
+    "requests",
+    "gdown",
+    "pytest",
+    # plugin breaks pytest >= 9 startup before 0.62.
+    "libtmux>=0.62",
+    # SciCode solutions import mpl_toolkits; not in the scicode extra.
+    "matplotlib",
+    "transformers",
+    "mini-swe-agent==2.4.6",
+]
+
+[project.optional-dependencies]
+# SSF offensive-cyber benchmarks. Kept OUT of the default install on purpose:
+# they only work with a Docker daemon, which SLURM clusters seldom have, and
+# they drag in a large challenge tree. Install on a Docker-capable host with:
+#     uv sync --extra cyber
+# This covers cybench (inspect-evals[cybench] -> inspect-cyber, which supplies the
+# challenge dataset).
+#
+# cve-bench needs one MORE package that is deliberately not declared here:
+#     uv pip install 'cvebench @ git+https://github.com/Scott-Simmons/cve-bench.git'
+# It has no extra in inspect-evals 0.5.2 (the task does a runtime
+# `require_optional_dependency("cvebench", ...)`) and it requires Python >=3.12,
+# which conflicts with this project's >=3.11 floor. uv resolves every extra when
+# locking, so declaring it here makes even a plain `uv sync` unsatisfiable and
+# takes the whole inspect suite down with it. Install it separately, on a
+# Python 3.12+ Docker host.
+cyber = [
+    "inspect-evals[cybench]==0.22.0",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.2",
+    "pytest",
+    "ruff>=0.17.3",
+]
+
+[tool.ruff]
+line-length = 120
+force-exclude = true
+extend-exclude = [
+    ".ipynb_checkpoints",
+    # Vendored from upstream allenai/IFBench; kept diffable against the source.
+    "domyn_inspect/tasks/ifbench/ifbench_lib",
+]
+
+[tool.ruff.lint]
+# CPY001 is a preview rule; explicit-preview-rules enables only the preview rules listed by name
+preview = true
+explicit-preview-rules = true
+extend-select = ["CPY001"]
+select = [
+    "F",
+    "E",
+    "W",
+    "C90",
+    "I",
+    "N",
+    "D",
+    "UP",
+    "YTT",
+    "ANN",
+    "BLE",
+    "FBT",
+    "B",
+    "B9",
+    "A",
+    "C4",
+    "T10",
+    "EM",
+    "ISC",
+    "ICN",
+    "LOG",
+    "G",
+    "PT",
+    "RSE",
+    "RET",
+    "SLF",
+    "SIM",
+    "ARG",
+    "PTH",
+    "TRY",
+    "NPY",
+    "PERF",
+    "RUF",
+]
+ignore = [
+    # Missing docstring in public package
+    "D100",
+    # Missing docstring in public module
+    "D104",
+    # Not supported by Pydantic
+    "UP046",
+    # Caching default value is set in the decorator
+    "FBT001",
+    # Ray type hint is not compatible with paths
+    "PTH207",
+    # Not supported by enums
+    "RUF012",
+]
+
+[tool.ruff.lint.extend-per-file-ignores]
+# Ignore unused imports
+"__init__.py" = ["F401"]
+# Ignore pydocstyle rules for tests
+# Tests can access private functions
+# Tests do not need type annotations or copyright headers
+"tests/*" = ["D", "SLF001", "ANN", "CPY001"]
+# Vendored files keep their upstream headers
+"domyn_inspect/tasks/cruxeval/extract.py" = ["CPY001"]
+# The prompts' trailing spaces are upstream's and reach the model
+"domyn_inspect/tasks/cruxeval/prompts.py" = ["CPY001", "W291"]
+"domyn_inspect/tasks/livebench_offline/amps_hard.py" = ["CPY001"]
+"domyn_inspect/tasks/ifbench/ifbench_lib/*" = ["CPY001"]
+
+[tool.ruff.lint.flake8-annotations]
+# `__init__` needs no `-> None` once its arguments are typed
+mypy-init-return = true
+
+[tool.ruff.lint.flake8-copyright]
+notice-rgx = "SPDX-FileCopyrightText: \\d{4} Domyn"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pyright]
+include = ["domyn_inspect"]
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+    ".git",
+    "**/build",
+    "env/**",
+    ".venv",
+    "**/.*",
+    "domyn_inspect/tasks/ifbench/ifbench_lib",
+]
+defineConstant = { DEBUG = true }
+reportMissingImports = "error"
+reportMissingTypeStubs = false
+
+pythonPlatform = "Linux"
+venvPath = "."
+venv = ".venv"
+
+[tool.uv.sources]
+ifbench = { git = "https://github.com/allenai/IFBench", rev = "1c40f0c10d9b5c5c2f10a175a28007ebb64f7f4d" }
+ifstruct = { git = "https://github.com/Liquid4All/ifstruct", rev = "1948dda22fb08bb1fe15eeb5332119d6087889ac" }
+instruction-following-eval = { git = "https://github.com/josejg/instruction_following_eval.git" }
+livebench = { git = "https://github.com/LiveBench/LiveBench.git" }
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+
+[tool.uv]
+override-dependencies = ["antlr4-python3-runtime==4.11.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

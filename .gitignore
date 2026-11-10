@@ -1,0 +1,11 @@
+.venv
+**/__pycache__
+results
+*.bak
+domyn-swarm/swarms
+domyn-swarm/defaults.yaml
+*.db
+.cache
+tmp/
+# Per-run scratch dirs written by inspect (the existing "tmp/" rule does not match these).
+tmp_*/

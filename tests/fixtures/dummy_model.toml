@@ -1,0 +1,28 @@
+[model]
+id = "dummy"
+name = "Dummy-Agent"
+path = "dummy/agent-model"
+url = "http://localhost:9999/v1"
+
+[judge]
+id = "dummy-judge"
+name = "Dummy-Judge"
+path = "dummy/judge-model"
+url = "http://localhost:9998/v1"
+
+[generation]
+reasoning = false
+max_tokens = 0
+max_model_len = 32768
+
+[generation.think]
+temperature = 0.6
+top_p = 0.95
+min_p = 0.0
+top_k = 20
+
+[generation.nothink]
+temperature = 0.7
+top_p = 0.8
+min_p = 0.0
+top_k = 20

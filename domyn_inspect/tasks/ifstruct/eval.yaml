@@ -1,0 +1,17 @@
+title: 'IFStruct: Structured-Output Instruction Following'
+description: |
+  2000 prompts asking for JSON or YAML output that must match a schema, an item count, a top-level structure (bare
+  list or wrapper key), a code fence and a no-commentary rule. A sample passes only if every check does.
+arxiv: https://huggingface.co/datasets/LiquidAI/ifstruct-v1.0
+group: Reasoning
+version: "1.0.0"
+tasks:
+  - name: ifstruct
+    dataset_samples: 2000
+external_assets:
+  - type: huggingface
+    source: LiquidAI/ifstruct-v1.0
+    fetch_method: hf_dataset
+    state: pinned
+  - type: vendored_code
+    source: https://github.com/Liquid4All/ifstruct/tree/1948dda22fb08bb1fe15eeb5332119d6087889ac

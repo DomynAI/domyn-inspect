@@ -1,0 +1,74 @@
+domyn-inspect
+Copyright 2026 Domyn
+
+This product includes code from third-party projects. The license text of each is in the folder of the task that
+includes it. Datasets are not included: each task downloads its dataset from its source at runtime, under that
+dataset's own license and terms.
+
+---
+
+CRUXEval
+Copyright (c) 2023 Meta
+License: MIT
+Source: https://github.com/facebookresearch/cruxeval
+
+Included in: domyn_inspect/tasks/cruxeval/prompts.py, domyn_inspect/tasks/cruxeval/extract.py
+License text: domyn_inspect/tasks/cruxeval/LICENSE
+
+---
+
+IFBench
+Copyright 2025 The Google Research Authors
+License: Apache-2.0
+Source: https://github.com/allenai/IFBench
+
+Included in: domyn_inspect/tasks/ifbench/ifbench_lib/
+License text: domyn_inspect/tasks/ifbench/LICENSE
+
+---
+
+LongBench
+Copyright (c) 2023 THU-KEG & Zhipu AI
+License: MIT
+Source: https://github.com/THUDM/LongBench
+
+Included in (answer extraction): domyn_inspect/tasks/longbench_v2/longbench_v2.py
+License text: domyn_inspect/tasks/longbench_v2/LICENSE
+
+---
+
+SafetyBench
+Copyright (c) 2023 thu-coai
+License: MIT
+Source: https://github.com/thu-coai/SafetyBench
+
+Included in (answer parsing): domyn_inspect/tasks/safetybench/safetybench.py
+License text: domyn_inspect/tasks/safetybench/LICENSE
+
+---
+
+SciCode
+License: Apache-2.0
+Source: https://github.com/scicode-bench/SciCode
+
+Included in (adapted, answer extraction): domyn_inspect/tasks/scicode_singularity/scicode_singularity.py
+License text: domyn_inspect/tasks/scicode_singularity/LICENSE
+
+---
+
+LiveBench
+Source: https://github.com/LiveBench/LiveBench
+License: as published in LiveBench's LICENSE file (FastChat's Apache-2.0 and LiveCodeBench's MIT texts)
+
+Included in (adapted): domyn_inspect/tasks/livebench_offline/amps_hard.py
+License text: domyn_inspect/tasks/livebench_offline/LICENSE
+
+---
+
+inspect_evals
+Copyright (c) 2024 UK AI Security Institute
+License: MIT
+Source: https://github.com/UKGovernmentBEIS/inspect_evals
+
+Included in (adapted): domyn_inspect/tasks/livebench_offline/scorer.py
+License text: domyn_inspect/tasks/livebench_offline/LICENSE-inspect_evals

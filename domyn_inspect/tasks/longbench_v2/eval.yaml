@@ -1,0 +1,20 @@
+title: 'LongBench v2: Long-Context Multiple Choice'
+description: |
+  503 four-choice questions over contexts of 8k to 2M words: single- and multi-document QA, long in-context
+  learning, long dialogue history, code repositories and structured data. Two-step chain of thought by default.
+arxiv: https://arxiv.org/abs/2412.15204
+group: Reasoning
+version: "1.0.0"
+tasks:
+  - name: longbench_v2
+    dataset_samples: 503
+external_assets:
+  - type: huggingface
+    source: THUDM/LongBench-v2
+    fetch_method: hf_dataset
+    state: pinned
+  - type: url
+    source: https://github.com/THUDM/LongBench/tree/2e00731f8d0bff23dc4325161044d0ed8af94c1e/prompts
+    state: pinned
+  - type: vendored_code
+    source: https://github.com/THUDM/LongBench/tree/2e00731f8d0bff23dc4325161044d0ed8af94c1e

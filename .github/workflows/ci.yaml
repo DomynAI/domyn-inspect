@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+jobs:
+  validate-names:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch name
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            echo "Skipping branch-name validation for main"
+            exit 0
+          fi
+
+          if [[ ! "$BRANCH_NAME" =~ ^(feat|fix|docs|refactor|test|chore|ci|build|perf)/[a-z0-9]+([._/-][a-z0-9]+)*$ ]]; then
+            echo "::error::Invalid branch name: $BRANCH_NAME"
+            echo "Expected: <type>/<description>"
+            echo "Examples: feat/cruxeval-pass-k, fix/sandbox-timeout"
+            exit 1
+          fi
+
+      - name: Validate PR title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if [[ ! "$PR_TITLE" =~ ^(feat|fix|docs|refactor|test|chore|ci|build|perf)(\([a-z0-9._/-]+\))?(!)?:\ .+ ]]; then
+            echo "::error::Invalid PR title: $PR_TITLE"
+            echo "Expected Conventional Commits format, e.g. 'feat(tasks): add a CRUXEval task'"
+            exit 1
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      # uv installs Python and caches the wheels it downloads, not the venv
+      - name: Set up uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+      - name: Run Python tests
+        run: uv run --locked pytest -v
+      - name: Cache the pre-commit environments
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ matrix.python-version }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Run hooks
+        env:
+          # The step above already runs the suite
+          SKIP: pytest
+        run: uvx pre-commit run --all-files --show-diff-on-failure

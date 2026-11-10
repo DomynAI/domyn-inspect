@@ -1,0 +1,61 @@
+# Install once per clone with: uv run pre-commit install
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+
+      - id: check-json
+
+      - id: check-toml
+
+      - id: check-merge-conflict
+
+      - id: check-case-conflict
+
+      - id: detect-private-key
+
+      - id: end-of-file-fixer
+        exclude: \.svg$
+
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: \.bat$
+
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        # Vendored text kept verbatim: the prompts' trailing spaces reach the model
+        exclude: ^domyn_inspect/tasks/(cruxeval/prompts\.py|livebench_offline/LICENSE)$
+
+      - id: check-added-large-files
+        args: ["--maxkb=2000"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      # Only the committed files, so the existing errors in untouched files do not block commits
+      - id: pyright
+        name: pyright
+        entry: pyright
+        language: node
+        language_version: lts
+        additional_dependencies: ["pyright@1.1.414"]
+        types: [python]
+        files: ^domyn_inspect/
+        exclude: ^domyn_inspect/tasks/ifbench/ifbench_lib/
+
+      - id: pytest
+        name: pytest
+        # The whole suite (~30s); the Singularity live tests skip themselves where `singularity` is missing.
+        entry: uv run --frozen pytest -q
+        language: system
+        types: [python]
+        pass_filenames: false

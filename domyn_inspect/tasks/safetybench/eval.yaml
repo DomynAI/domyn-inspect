@@ -1,0 +1,18 @@
+title: 'SafetyBench: Evaluating the Safety of Large Language Models'
+description: |
+  11,435 English multiple-choice questions over 7 safety categories (offensiveness, unfairness and bias, physical
+  health, mental health, illegal activities, ethics and morality, privacy and property), zero- or 5-shot.
+arxiv: https://arxiv.org/abs/2309.07045
+group: Safety
+version: "1.0.0"
+tasks:
+  - name: safetybench
+    dataset_samples: 11435
+external_assets:
+  - type: huggingface
+    source: thu-coai/SafetyBench
+    fetch_method: hf_dataset
+    state: pinned
+  - type: url
+    source: https://github.com/thu-coai/SafetyBench/blob/027b3ca8434e56acfb51c7e7b18a3cb2aff09d4b/opensource_data/test_answers_en.json
+    state: pinned
