@@ -42,6 +42,33 @@ def load_tokenizer(path: str) -> Any | None:  # noqa: ANN401
         return None
 
 
+def parse_tool_call_arguments(messages: list[Any]) -> list[Any]:
+    """``messages`` with each tool call's JSON-string ``arguments`` parsed into a dict, as vLLM does before rendering.
+
+    OpenAI-format tool calls carry their arguments as a JSON string, but chat templates iterate them as a mapping
+    (``tool_call.arguments|items``). Arguments that are not a JSON object are left as they are.
+    """
+    parsed = []
+    for message in messages:
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if not tool_calls:
+            parsed.append(message)
+            continue
+        calls = []
+        for call in tool_calls:
+            function = call.get("function") if isinstance(call, dict) else None
+            if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+                try:
+                    value = json.loads(function["arguments"])
+                except ValueError:
+                    value = None
+                if isinstance(value, dict):
+                    call = {**call, "function": {**function, "arguments": value}}
+            calls.append(call)
+        parsed.append({**message, "tool_calls": calls})
+    return parsed
+
+
 def count_prompt(budget: dict[str, Any], messages: list[Any], tools: list[Any] | None = None) -> tuple[int, int]:
     """``(prompt tokens, safety margin)`` for a request with these (OpenAI-format) messages and tools."""
     margin = budget["token_safety_margin"]
@@ -49,7 +76,7 @@ def count_prompt(budget: dict[str, Any], messages: list[Any], tools: list[Any] |
     if tokenizer is not None:
         try:
             prompt = tokenizer.apply_chat_template(
-                messages,
+                parse_tool_call_arguments(messages),
                 tools=tools,
                 tokenize=True,
                 add_generation_prompt=True,
