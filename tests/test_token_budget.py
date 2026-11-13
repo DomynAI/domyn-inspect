@@ -8,8 +8,10 @@ import pytest
 from domyn_inspect.config import (
     DEFAULT_COMPLETION_RESERVE,
     DEFAULT_REASONING_COMPLETION_RESERVE,
+    ContextConfig,
+    DomynInspectConfig,
     GenerationConfig,
-    GenerationModeConfig,
+    ModelConfig,
     load_inspect_config,
 )
 from domyn_inspect.runner import token_budget
@@ -17,13 +19,12 @@ from domyn_inspect.tasks._long_context import prompt_token_limit
 from domyn_inspect.token_budget import count_prompt, load_tokenizer
 
 
-def generation(min_completion_tokens=None, **over):
-    think = GenerationModeConfig(min_completion_tokens=min_completion_tokens)
-    return GenerationConfig(**{"think": think, "max_model_len": 65536, **over})
+def generation(reasoning=True, **context):  # noqa: FBT002
+    return GenerationConfig(reasoning=reasoning, context=ContextConfig(**{"max_model_len": 65536, **context}))
 
 
 def budget(tasks_max_tokens=None, **gen):
-    model_cfg = SimpleNamespace(generation=generation(**gen), model=SimpleNamespace(path="org/model/"))
+    model_cfg = DomynInspectConfig(model=ModelConfig(path="org/model/", generation=generation(**gen)))
     tasks_cfg = SimpleNamespace(inspect=SimpleNamespace(max_tokens=tasks_max_tokens))
     return token_budget(tasks_cfg, model_cfg)
 
@@ -31,35 +32,24 @@ def budget(tasks_max_tokens=None, **gen):
 @pytest.mark.parametrize("max_model_len", [0, -1])
 def test_the_window_is_required(max_model_len):
     with pytest.raises(ValueError, match="max_model_len"):
-        generation(max_model_len=max_model_len)
+        DomynInspectConfig(model=ModelConfig(generation=generation(max_model_len=max_model_len)))
 
 
 def test_the_budget_comes_from_the_model_config():
     gen = generation()
     assert budget()["tokenizer_path"] == "org/model"  # model.path when tokenizer_path is unset
     # no explicit cap: the window minus the configured margin and completion reserve
-    assert prompt_token_limit(budget(min_completion_tokens=8192)) == 65536 - gen.token_safety_margin - 8192
+    assert prompt_token_limit(budget(completion_reserve=8192)) == 65536 - gen.context.token_safety_margin - 8192
     # unset: the default reserve for the mode
-    assert prompt_token_limit(budget()) == 65536 - gen.token_safety_margin - DEFAULT_REASONING_COMPLETION_RESERVE
-    assert prompt_token_limit(budget(reasoning=False)) == 65536 - gen.token_safety_margin - DEFAULT_COMPLETION_RESERVE
+    margin = gen.context.token_safety_margin
+    assert prompt_token_limit(budget()) == 65536 - margin - DEFAULT_REASONING_COMPLETION_RESERVE
+    assert prompt_token_limit(budget(reasoning=False)) == 65536 - margin - DEFAULT_COMPLETION_RESERVE
 
 
-@pytest.mark.parametrize(("reasoning", "reserve"), [("true", 8192), ("false", 4096)])
-def test_the_reserve_is_the_selected_modes(tmp_path, reasoning, reserve):
+def test_the_reserve_is_read_from_the_context(tmp_path):
     path = tmp_path / "model.toml"
-    path.write_text(
-        f"""
-[generation]
-reasoning = {reasoning}
-max_tokens = 0
-max_model_len = 65536
-[generation.think]
-min_completion_tokens = 8192
-[generation.nothink]
-min_completion_tokens = 4096
-"""
-    )
-    assert load_inspect_config(str(path)).generation.mode.min_completion_tokens == reserve
+    path.write_text("[model.generation.context]\nmax_model_len = 65536\ncompletion_reserve = 2048\n")
+    assert load_inspect_config(str(path)).model.generation.completion_reserve == 2048
 
 
 def test_the_reserve_is_the_cap_inspect_actually_sends():

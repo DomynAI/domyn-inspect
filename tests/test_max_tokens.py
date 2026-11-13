@@ -10,7 +10,8 @@ from domyn_inspect.runner import effective_max_tokens
 
 def configs(model_max_tokens, tasks_max_tokens, window):
     tasks_cfg = SimpleNamespace(inspect=SimpleNamespace(max_tokens=tasks_max_tokens))
-    model_cfg = SimpleNamespace(generation=SimpleNamespace(max_tokens=model_max_tokens, max_model_len=window))
+    context = SimpleNamespace(max_tokens=model_max_tokens, max_model_len=window)
+    model_cfg = SimpleNamespace(model=SimpleNamespace(generation=SimpleNamespace(context=context)))
     return tasks_cfg, model_cfg
 
 

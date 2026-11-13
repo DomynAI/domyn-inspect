@@ -14,67 +14,82 @@ from typing import Any
 import click
 
 import domyn_inspect.provider  # noqa: F401
-from domyn_inspect.config import DomynInspectConfig, GenerationConfig, TasksConfig  # type: ignore
+from domyn_inspect.config import DomynInspectConfig, ModelConfig, SamplingConfig, TasksConfig  # type: ignore
 
 
-def _build_model_roles(
-    model_cfg: DomynInspectConfig, user_sim_temperature: float, *, client_timeout: float
-) -> dict[str, Any]:
-    """Register the inspect model roles served by the ``[judge]`` endpoint.
+def role_players(model_cfg: DomynInspectConfig) -> dict[str, tuple[str, ModelConfig]]:
+    """The section playing each model role, by role.
 
-    - ``role="user"`` — tau2's *user simulator*.
-    - ``role="grader"`` — HLE's LLM-as-judge scorer.
-
-    Endpoint selection:
-      - a dedicated ``[judge]`` endpoint if one is configured, else
-      - **self-play**: the model-under-test's own endpoint (``user`` only).
-
+    - ``user``, tau2's *user simulator*: ``[user]`` if it is served, else ``[judge]``, else the model under test
+      (**self-play**).
+    - ``grader``, the LLM-as-judge of model-graded scorers (HLE): ``[judge]`` if it is served; without one, inspect
+      grades with the model under test.
     """
-    from urllib.parse import urlparse
+    judge, user = model_cfg.judge, model_cfg.user
+    if user.is_served:
+        players = {"user": ("user", user)}
+    elif judge.is_served:
+        players = {"user": ("judge", judge)}
+    else:
+        players = {"user": ("model", model_cfg.model)}
+    if judge.is_served:
+        players["grader"] = ("judge", judge)
+    return players
 
+
+def _build_model_roles(model_cfg: DomynInspectConfig, *, client_timeout: float) -> dict[str, Any]:
+    """The inspect model roles, each on the model playing it (``role_players``).
+
+    A role samples with its table of its model's generation (e.g. ``[user.generation.user]``) over that model's
+    selected mode, capped by its ``context.max_tokens``.
+    """
     from inspect_ai.model import GenerateConfig, Model, get_model
-
-    judge = model_cfg.judge
-    judge_ok = bool(judge and judge.path and judge.url and urlparse(judge.url).hostname)
-    if judge_ok:
-        path, url = judge.path, judge.url
-    else:  # self-play
-        path, url = model_cfg.model.path, model_cfg.model.url
 
     api_key = os.getenv("API_KEY", "") or os.getenv("_API_KEY", "") or "EMPTY"
 
-    def _role_model(temperature: float) -> Model:
+    def _role_model(role: str, player: ModelConfig) -> Model:
+        gen = player.generation
+        params = gen.role(role)
         return get_model(
-            f"domyn/{path}",
-            base_url=url,
+            f"domyn/{player.path}",
+            base_url=player.url,
             api_key=api_key,
-            config=GenerateConfig(temperature=temperature),
+            config=GenerateConfig(
+                temperature=params.temperature,
+                top_p=params.top_p,
+                presence_penalty=params.presence_penalty,
+                frequency_penalty=params.frequency_penalty,
+                max_tokens=gen.context.max_tokens or None,
+                extra_body=sampling_extra_body(params) or None,
+            ),
             max_retries=0,
             client_timeout=client_timeout,
         )
 
-    roles: dict[str, Any] = {"user": _role_model(user_sim_temperature)}
+    return {role: _role_model(role, player) for role, (_, player) in role_players(model_cfg).items()}
 
-    if judge_ok:
-        roles["grader"] = _role_model(0.0)
 
-    return roles
+def _role_sampling(model: Any) -> str:  # noqa: ANN401 - an inspect Model, imported lazily
+    """The sampling params a role sends, for the log: those set, plus extra_body's."""
+    config = model.config.model_dump(include={"temperature", "top_p", "presence_penalty", "frequency_penalty"})
+    params = {**config, "max_tokens": model.config.max_tokens, **(model.config.extra_body or {})}
+    return ", ".join(f"{key}={value}" for key, value in params.items() if value is not None)
 
 
 def effective_max_tokens(tasks_cfg: TasksConfig, model_cfg: DomynInspectConfig) -> int | None:
     """The max_tokens of every task whose entry sets none, or None to let the server budget each request.
 
-    A tasks TOML's [inspect] max_tokens overrides the model's [generation] max_tokens when it
+    A tasks TOML's [inspect] max_tokens overrides the model's context max_tokens when it
     is > 0; otherwise the model's applies. A cap that fills the whole context window leaves no
     room for any prompt, so it is dropped and vLLM budgets each request as
     max_model_len - prompt_tokens.
     """
-    gen = model_cfg.generation
+    context = model_cfg.model.generation.context
     tasks_max_tokens = tasks_cfg.inspect.max_tokens
-    max_tokens = tasks_max_tokens if tasks_max_tokens and tasks_max_tokens > 0 else gen.max_tokens
+    max_tokens = tasks_max_tokens if tasks_max_tokens and tasks_max_tokens > 0 else context.max_tokens
     if not max_tokens or max_tokens <= 0:
         return None
-    window = gen.max_model_len
+    window = context.max_model_len
     if max_tokens >= window:
         logging.getLogger(__name__).info(
             "max_tokens=%s fills the %s-token context window; omitting it so the server budgets each request",
@@ -85,23 +100,22 @@ def effective_max_tokens(tasks_cfg: TasksConfig, model_cfg: DomynInspectConfig) 
     return max_tokens
 
 
-def sampling_extra_body(gen: GenerationConfig) -> dict[str, Any]:
+def sampling_extra_body(params: SamplingConfig) -> dict[str, Any]:
     """The vLLM sampling params with no OpenAI API field, sent in the request body as-is.
 
     top_k is one: inspect's OpenAI-compatible provider drops ``GenerateConfig.top_k``, so without it here vLLM
     samples with the model's default (no top-k when it ships no generation_config.json).
     """
-    mode = gen.mode
     extra_body: dict[str, Any] = {}
-    if mode.top_k is not None:
-        extra_body["top_k"] = mode.top_k
-    if mode.min_p is not None:
-        extra_body["min_p"] = mode.min_p
-    if mode.repetition_penalty is not None:
-        extra_body["repetition_penalty"] = mode.repetition_penalty
+    if params.top_k is not None:
+        extra_body["top_k"] = params.top_k
+    if params.min_p is not None:
+        extra_body["min_p"] = params.min_p
+    if params.repetition_penalty is not None:
+        extra_body["repetition_penalty"] = params.repetition_penalty
 
-    if mode.chat_template_kwargs:
-        extra_body["chat_template_kwargs"] = mode.chat_template_kwargs
+    if params.chat_template_kwargs:
+        extra_body["chat_template_kwargs"] = params.chat_template_kwargs
     return extra_body
 
 
@@ -111,13 +125,13 @@ def token_budget(tasks_cfg: TasksConfig, model_cfg: DomynInspectConfig) -> dict[
     Built from the model config alone, with the cap inspect actually sends (``effective_max_tokens``), so the
     completion room a truncated prompt leaves is the room the request asks for.
     """
-    gen = model_cfg.generation
+    gen = model_cfg.model.generation
     return {
-        "max_model_len": gen.max_model_len,
+        "max_model_len": gen.context.max_model_len,
         "max_tokens": effective_max_tokens(tasks_cfg, model_cfg),
-        "token_safety_margin": gen.token_safety_margin,
-        "min_completion_tokens": gen.min_completion_tokens,
-        "tokenizer_path": (gen.tokenizer_path or model_cfg.model.path).rstrip("/"),
+        "token_safety_margin": gen.context.token_safety_margin,
+        "completion_reserve": gen.completion_reserve,
+        "tokenizer_path": (gen.context.tokenizer_path or model_cfg.model.path).rstrip("/"),
         "chat_template_kwargs": gen.mode.chat_template_kwargs or {},
     }
 
@@ -165,7 +179,7 @@ def run_eval(
 
     # Build generation kwargs (only those explicitly set).
     gen_kwargs: dict[str, Any] = {}
-    gen = model_cfg.generation
+    gen = model_cfg.model.generation
     gen_kwargs["temperature"] = gen.mode.temperature
     gen_kwargs["top_p"] = gen.mode.top_p
     # Set per task, not passed to eval_set: eval_set's config is merged over each task's own,
@@ -176,23 +190,22 @@ def run_eval(
             task.config = task.config.model_copy(update={"max_tokens": max_tokens})
     gen_kwargs["presence_penalty"] = gen.mode.presence_penalty
     gen_kwargs["frequency_penalty"] = gen.mode.frequency_penalty
-    gen_kwargs["extra_body"] = sampling_extra_body(gen)
+    gen_kwargs["extra_body"] = sampling_extra_body(gen.mode)
 
-    http_timeout_s = float(tasks_cfg.inspect.request_timeout or gen.request_timeout)
+    http_timeout_s = float(tasks_cfg.inspect.request_timeout or model_cfg.general.request_timeout)
     gen_kwargs["timeout"] = int(http_timeout_s)
-    gen_kwargs["max_retries"] = gen.max_retries
+    gen_kwargs["max_retries"] = model_cfg.general.max_retries
 
-    # Register judge-driven roles: tau2 user-simulator (role="user") and
-    # HLE grader (role="grader"); see _build_model_roles.
-    user_sim_temperature = tasks_cfg.inspect.user_sim_temperature
-    model_roles = _build_model_roles(model_cfg, user_sim_temperature, client_timeout=http_timeout_s)
-    _j = model_cfg.judge
-    _user_src = f"[judge] {_j.url}" if "grader" in model_roles else f"self-play {model_cfg.model.url}"
-    click.echo(f"User-simulator role -> {_user_src}  (temperature={user_sim_temperature})")
-    _grader_src = (
-        f"[judge] {_j.url}  (temperature=0.0)" if "grader" in model_roles else "model-under-test (inspect default)"
-    )
-    click.echo(f"Grader role         -> {_grader_src}")
+    # The tau2 user simulator (role="user") and the model-graded scorers' grader (role="grader")
+    model_roles = _build_model_roles(model_cfg, client_timeout=http_timeout_s)
+    players = role_players(model_cfg)
+    for role, label in (("user", "User-simulator role"), ("grader", "Grader role")):
+        if role in players:
+            section, player = players[role]
+            source = f"[{section}] {player.url}  ({_role_sampling(model_roles[role])})"
+        else:
+            source = "model-under-test (inspect default)"
+        click.echo(f"{label:<19} -> {source}")
 
     click.echo(f"Running eval_set  ({len(resolved)} tasks, max_tasks={tasks_cfg.general.max_tasks}) …\n")
 
@@ -259,8 +272,8 @@ def print_dry_run(
             click.echo(f"       generate:  {gen_str}")
 
     click.echo(f"\n  Model:           {model_cfg.model.id}")
-    if model_cfg.judge.path:
-        click.echo(f"  Judge (user):    {model_cfg.judge.path}  ({model_cfg.judge.url})")
+    for role, (section, player) in role_players(model_cfg).items():
+        click.echo(f"  {role.capitalize() + ':':<17}{player.path}  ([{section}] {player.url})")
     click.echo(f"  Log dir:         {log_dir}")
     click.echo(f"  Max tasks:       {tasks_cfg.general.max_tasks}")
     click.echo(f"  Max connections: {model_cfg.inspect.num_threads}")
@@ -271,13 +284,13 @@ def print_dry_run(
         click.echo(f"  Limit:           {limit}")
 
     # Generation
-    gen = model_cfg.generation
+    gen = model_cfg.model.generation
     mode = gen.mode
-    _window = gen.max_model_len
+    _window = gen.context.max_model_len
     _eff_max_tokens = effective_max_tokens(tasks_cfg, model_cfg)
     _mt = _eff_max_tokens if _eff_max_tokens is not None else f"auto (window {_window})"
     if (tasks_cfg.inspect.max_tokens or 0) > 0:
-        _mt = f"{_mt} (tasks override; model {gen.max_tokens})"
+        _mt = f"{_mt} (tasks override; model {gen.context.max_tokens})"
     click.echo(
         f"\n  temperature={mode.temperature}  top_p={mode.top_p}  "
         f"top_k={mode.top_k}  min_p={mode.min_p}  "
