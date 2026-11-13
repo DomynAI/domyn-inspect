@@ -71,7 +71,7 @@ id = "domyn-edge"                # names the results directory
 path = "domyn/Domyn-Edge-SFT"    # the served model name
 url = "http://localhost:8000/v1"
 
-[generation]
+[model.generation.context]
 max_model_len = 32768            # required: the server's --max-model-len
 ```
 
@@ -129,47 +129,70 @@ level `info` unless `INSPECT_LOG_LEVEL` is set; scores are in the `.eval` logs. 
 The endpoint and generation settings. When run from domyn-eval, this is the run's config snapshot.
 
 ```toml
+[general]
+# request_timeout = 3600         # per-request read and connect timeout (s)
+# max_retries = 0                # inspect's retries of a failed request
+# num_threads = 64               # concurrent requests; default for [inspect].num_threads
+
 [model]
 id = "domyn-edge"                # results subdirectory
 path = "domyn/Domyn-Edge-SFT"    # served model name; also the tokenizer, unless tokenizer_path is set
 url = "http://<node>:9000/v1"
 
-[judge]                          # optional: the grader and user-simulator roles; without one, the model plays them
+[model.generation]
+reasoning = true                 # picks [model.generation.think] or [model.generation.nothink]
+
+[model.generation.think]
+temperature = 0.6
+top_p = 0.95
+
+[model.generation.nothink]
+temperature = 0.7
+top_p = 0.8
+
+[model.generation.context]
+max_model_len = 65536            # required: the server's --max-model-len
+max_tokens = 0                   # cap sent with every request; 0 lets the server budget each one
+# tokenizer_path = "..."         # counts prompt tokens for long-context truncation (default model.path)
+# token_safety_margin = 256      # tokens kept free when estimating the available budget
+# completion_reserve = 8192      # output room kept when long-context tasks truncate (default: 8192 think, 4096 nothink)
+
+[judge]                          # optional: the grader, and the user simulator unless [user] is set
 path = "Qwen/Qwen3.5-9B"
 url = "http://<node>:9001/v1"
 
-[generation]
-reasoning = true                 # picks [generation.think] or [generation.nothink]
-max_tokens = 0                   # cap sent with every request; 0 lets the server budget each one
-max_model_len = 65536            # required: the server's --max-model-len
-# tokenizer_path = "..."         # counts prompt tokens for long-context truncation (default model.path)
-# token_safety_margin = 256      # tokens kept free when estimating the available budget
-# request_timeout = 3600         # per-request read and connect timeout (s)
-# max_retries = 0                # inspect's retries of a failed request
-# num_threads = 64               # concurrent requests; default for [inspect].num_threads
+# [judge.generation.grader]      # the model-graded scorers' grader, over the judge's mode; the keys of the modes
+# temperature = 0.0              # the default; a table keeps it unless it sets its own
+#
+# [judge.generation.context]
+# max_tokens = 4096              # the default cap on each role's generation; 0 lets the server budget each
 
-[generation.think]
-temperature = 0.6
-top_p = 0.95
-# min_completion_tokens = 8192   # output room kept when long-context tasks truncate (default: 8192 think, 4096 nothink)
-
-[generation.nothink]
-temperature = 0.7
-top_p = 0.8
+# [user]                         # optional: another model for tau2's user simulator
+# path = "Qwen/Qwen3.5-4B"
+# url = "http://<node>:9002/v1"
+#
+# [user.generation.user]         # the user simulator, over this model's mode
+# temperature = 0.0              # the default, as tau2 asks of its user
+# chat_template_kwargs = { enable_thinking = false }
 
 [inspect]
 num_threads = 100                # concurrent requests to the endpoint
 ```
 
+The user simulator is played by `[user]`, else `[judge]`, else the model under test (self-play); the grader by
+`[judge]`, else by the model under test. Each samples with its role's table of its model's generation, e.g.
+`[user.generation.user]`, over that model's mode, capped by its `context.max_tokens`: 4096 by default for `[judge]` and
+`[user]`, but the model's own in self-play.
+
 Long-context tasks cut the middle of their documents when a prompt does not fit. The prompt may use
-`max_model_len - token_safety_margin`, minus `max_tokens` when that is set below the window, else minus the selected
-mode's `min_completion_tokens`.
+`max_model_len - token_safety_margin`, minus `max_tokens` when that is set below the window, else minus
+`completion_reserve`.
 
 <details>
 <summary>Timeouts</summary>
 
 There is no separate connect timeout: inspect uses the request timeout for both, i.e. `[inspect] request_timeout` of the
-task config, else `generation.request_timeout` of the model config (default 3600s). The effective value is
+task config, else `general.request_timeout` of the model config (default 3600s). The effective value is
 `max(request timeout, $INSPECT_HTTP_CONNECT_TIMEOUT)`, so:
 
 - to change it, change `request_timeout`, which also changes how long a request may run;
