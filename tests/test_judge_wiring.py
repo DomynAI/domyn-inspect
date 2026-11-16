@@ -1,4 +1,4 @@
-"""The "user" role (tau2's user simulator) is played by ``[user]``, else ``[judge]``; "grader" by ``[judge]``."""
+"""The "user" model role is played by ``[user]``, else ``[judge]``; "grader" by ``[judge]``."""
 
 from pathlib import Path
 
@@ -18,7 +18,7 @@ def test_judge_serves_user_and_grader():
         assert "dummy/judge-model" in model.name
         assert model.api.base_url == "http://localhost:9998/v1"
         assert model.api.client.timeout == 1234.0
-    # both deterministic by default, as tau2 asks of its user simulator
+    # both deterministic by default
     assert roles["user"].config.temperature == 0.0
     assert roles["grader"].config.temperature == 0.0
 
@@ -39,12 +39,17 @@ def _load_with(tmp_path, extra: str):
     ],
 )
 def test_judge_roles_cap_their_generations(tmp_path, judge, expected):
-    """A looping user simulator must not write its whole context window into the conversation."""
+    """A role model stuck in a loop must not write its whole context window into the conversation."""
     roles = runner._build_model_roles(_load_with(tmp_path, judge), client_timeout=1234.0)
     assert {model.config.max_tokens for model in roles.values()} == {expected}
 
 
-JUDGE_ROLES = """
+@pytest.fixture
+def judge_roles_cfg(tmp_path):
+    """The dummy config with a sampling table for each role the judge plays."""
+    return _load_with(
+        tmp_path,
+        """
 [judge.generation.user]
 top_p = 0.8
 top_k = 20
@@ -52,11 +57,12 @@ presence_penalty = 1.5
 chat_template_kwargs = { enable_thinking = false }
 [judge.generation.grader]
 top_k = 1
-"""
+""",
+    )
 
 
-def test_each_role_samples_with_its_own_table(tmp_path):
-    roles = runner._build_model_roles(_load_with(tmp_path, JUDGE_ROLES), client_timeout=1.0)
+def test_each_role_samples_with_its_own_table(judge_roles_cfg):
+    roles = runner._build_model_roles(judge_roles_cfg, client_timeout=1.0)
     user, grader = roles["user"].config, roles["grader"].config
     assert (user.temperature, user.top_p, user.presence_penalty) == (0.0, 0.8, 1.5)  # the default temperature kept
     assert user.extra_body == {"top_k": 20, "chat_template_kwargs": {"enable_thinking": False}}
@@ -128,27 +134,32 @@ def test_run_eval_forwards_the_roles(tmp_path, monkeypatch):
     assert "dummy/judge-model" in roles["grader"].name
 
 
-USER_MODEL = """
+@pytest.fixture
+def user_model_cfg(tmp_path):
+    """The dummy config with a served ``[user]`` model and its own user table."""
+    return _load_with(
+        tmp_path,
+        """
 [user]
 path = "dummy/user-model"
 url = "http://localhost:9997"
 [user.generation.user]
 temperature = 0.5
-"""
+""",
+    )
 
 
-def test_a_user_model_plays_the_user_and_the_judge_grades(tmp_path):
-    roles = runner._build_model_roles(_load_with(tmp_path, USER_MODEL), client_timeout=1.0)
+def test_a_user_model_plays_the_user_and_the_judge_grades(user_model_cfg):
+    roles = runner._build_model_roles(user_model_cfg, client_timeout=1.0)
     user, grader = roles["user"], roles["grader"]
     assert ("dummy/user-model" in user.name, user.api.base_url) == (True, "http://localhost:9997/v1")
     assert (user.config.temperature, user.config.max_tokens) == (0.5, 4096)  # its own table, the role models' cap
     assert ("dummy/judge-model" in grader.name, grader.api.base_url) == (True, "http://localhost:9998/v1")
 
 
-def test_a_user_model_without_a_judge_plays_only_the_user(tmp_path):
-    cfg = _load_with(tmp_path, USER_MODEL)
-    cfg.judge.path = ""
-    roles = runner._build_model_roles(cfg, client_timeout=1.0)
+def test_a_user_model_without_a_judge_plays_only_the_user(user_model_cfg):
+    user_model_cfg.judge.path = ""
+    roles = runner._build_model_roles(user_model_cfg, client_timeout=1.0)
     assert set(roles) == {"user"}
     assert "dummy/user-model" in roles["user"].name
 
@@ -158,12 +169,11 @@ def test_a_user_section_without_an_endpoint_leaves_the_user_to_the_judge(tmp_pat
     assert "dummy/judge-model" in roles["user"].name
 
 
-def test_the_players_are_logged(tmp_path, monkeypatch, capsys):
-    cfg = _load_with(tmp_path, USER_MODEL)
+def test_the_players_are_logged(tmp_path, monkeypatch, capsys, user_model_cfg):
     monkeypatch.setattr(inspect_ai, "eval_set", lambda **kwargs: (True, []))  # noqa: ARG005
     monkeypatch.setattr(resolver, "resolve_tasks", lambda cfg: [inspect_ai.Task() for _ in cfg.tasks])
     tasks_cfg = TasksConfig(general=TasksGeneralConfig(name="t"), tasks=[TaskEntry(task="dummy")])
-    runner.run_eval(tasks_cfg, cfg, log_dir=str(tmp_path), limit=None)
+    runner.run_eval(tasks_cfg, user_model_cfg, log_dir=str(tmp_path), limit=None)
     out = capsys.readouterr().out
-    assert "User-simulator role -> [user] http://localhost:9997/v1" in out
-    assert "Grader role         -> [judge] http://localhost:9998/v1" in out
+    assert "User role   -> [user] http://localhost:9997/v1" in out
+    assert "Grader role -> [judge] http://localhost:9998/v1" in out

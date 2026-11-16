@@ -33,7 +33,7 @@ domyn-inspect makes it easier to integrate custom inspect-ai tasks with domyn-ev
 ### Configure
 
 - **domyn-eval's model config**, read as is: endpoint, judge and think/nothink sampling
-- **Judge endpoint** wired to the grader and user-simulator roles
+- **Judge endpoint** wired to the `grader` and `user` model roles
 - **Custom tasks** registered by adding a folder under `domyn_inspect/tasks/`
 - **Dual scoring** (opt-in): upstream strict extraction next to a robust one
 
@@ -157,30 +157,31 @@ max_tokens = 0                   # cap sent with every request; 0 lets the serve
 # token_safety_margin = 256      # tokens kept free when estimating the available budget
 # completion_reserve = 8192      # output room kept when long-context tasks truncate (default: 8192 think, 4096 nothink)
 
-[judge]                          # optional: the grader, and the user simulator unless [user] is set
+[judge]                          # optional: plays the grader role, and the user role unless [user] is set
 path = "Qwen/Qwen3.5-9B"
 url = "http://<node>:9001/v1"
 
-# [judge.generation.grader]      # the model-graded scorers' grader, over the judge's mode; the keys of the modes
+# [judge.generation.grader]      # the grader role, over the judge's mode; the keys of the modes
 # temperature = 0.0              # the default; a table keeps it unless it sets its own
 #
 # [judge.generation.context]
 # max_tokens = 4096              # the default cap on each role's generation; 0 lets the server budget each
 
-# [user]                         # optional: another model for tau2's user simulator
+# [user]                         # optional: another model for the user role
 # path = "Qwen/Qwen3.5-4B"
 # url = "http://<node>:9002/v1"
 #
-# [user.generation.user]         # the user simulator, over this model's mode
-# temperature = 0.0              # the default, as tau2 asks of its user
+# [user.generation.user]         # the user role, over this model's mode
+# temperature = 0.0              # the default
 # chat_template_kwargs = { enable_thinking = false }
 
 [inspect]
 num_threads = 100                # concurrent requests to the endpoint
 ```
 
-The user simulator is played by `[user]`, else `[judge]`, else the model under test (self-play); the grader by
-`[judge]`, else by the model under test. Each samples with its role's table of its model's generation, e.g.
+`user` and `grader` are inspect model roles: any task that calls `get_model(role="user")` or
+`get_model(role="grader")` gets the model playing it. The user role is played by `[user]`, else `[judge]`, else the
+model under test (self-play); the grader role by `[judge]`, else by the model under test. Each samples with its role's table of its model's generation, e.g.
 `[user.generation.user]`, over that model's mode, capped by its `context.max_tokens`: 4096 by default for `[judge]` and
 `[user]`, but the model's own in self-play.
 

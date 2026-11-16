@@ -17,13 +17,13 @@ import domyn_inspect.provider  # noqa: F401
 from domyn_inspect.config import DomynInspectConfig, ModelConfig, SamplingConfig, TasksConfig  # type: ignore
 
 
-def role_players(model_cfg: DomynInspectConfig) -> dict[str, tuple[str, ModelConfig]]:
-    """The section playing each model role, by role.
+def _role_players(model_cfg: DomynInspectConfig) -> dict[str, tuple[str, ModelConfig]]:
+    """The section playing each inspect model role, by role.
 
-    - ``user``, tau2's *user simulator*: ``[user]`` if it is served, else ``[judge]``, else the model under test
-      (**self-play**).
-    - ``grader``, the LLM-as-judge of model-graded scorers (HLE): ``[judge]`` if it is served; without one, inspect
-      grades with the model under test.
+    Any task that calls ``get_model(role=...)`` gets the model playing that role.
+
+    - ``user``: ``[user]`` if it is served, else ``[judge]``, else the model under test (**self-play**).
+    - ``grader``: ``[judge]`` if it is served; without one, inspect falls back to the model under test.
     """
     judge, user = model_cfg.judge, model_cfg.user
     if user.is_served:
@@ -38,7 +38,7 @@ def role_players(model_cfg: DomynInspectConfig) -> dict[str, tuple[str, ModelCon
 
 
 def _build_model_roles(model_cfg: DomynInspectConfig, *, client_timeout: float) -> dict[str, Any]:
-    """The inspect model roles, each on the model playing it (``role_players``).
+    """The inspect model roles, each on the model playing it (``_role_players``).
 
     A role samples with its table of its model's generation (e.g. ``[user.generation.user]``) over that model's
     selected mode, capped by its ``context.max_tokens``.
@@ -66,7 +66,7 @@ def _build_model_roles(model_cfg: DomynInspectConfig, *, client_timeout: float) 
             client_timeout=client_timeout,
         )
 
-    return {role: _role_model(role, player) for role, (_, player) in role_players(model_cfg).items()}
+    return {role: _role_model(role, player) for role, (_, player) in _role_players(model_cfg).items()}
 
 
 def _role_sampling(model: Any) -> str:  # noqa: ANN401 - an inspect Model, imported lazily
@@ -196,16 +196,16 @@ def run_eval(
     gen_kwargs["timeout"] = int(http_timeout_s)
     gen_kwargs["max_retries"] = model_cfg.general.max_retries
 
-    # The tau2 user simulator (role="user") and the model-graded scorers' grader (role="grader")
+    # The models any task gets from get_model(role="user") and get_model(role="grader")
     model_roles = _build_model_roles(model_cfg, client_timeout=http_timeout_s)
-    players = role_players(model_cfg)
-    for role, label in (("user", "User-simulator role"), ("grader", "Grader role")):
+    players = _role_players(model_cfg)
+    for role, label in (("user", "User role"), ("grader", "Grader role")):
         if role in players:
             section, player = players[role]
             source = f"[{section}] {player.url}  ({_role_sampling(model_roles[role])})"
         else:
             source = "model-under-test (inspect default)"
-        click.echo(f"{label:<19} -> {source}")
+        click.echo(f"{label:<11} -> {source}")
 
     click.echo(f"Running eval_set  ({len(resolved)} tasks, max_tasks={tasks_cfg.general.max_tasks}) …\n")
 
@@ -272,7 +272,7 @@ def print_dry_run(
             click.echo(f"       generate:  {gen_str}")
 
     click.echo(f"\n  Model:           {model_cfg.model.id}")
-    for role, (section, player) in role_players(model_cfg).items():
+    for role, (section, player) in _role_players(model_cfg).items():
         click.echo(f"  {role.capitalize() + ':':<17}{player.path}  ([{section}] {player.url})")
     click.echo(f"  Log dir:         {log_dir}")
     click.echo(f"  Max tasks:       {tasks_cfg.general.max_tasks}")

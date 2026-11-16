@@ -1,7 +1,10 @@
 """Sampling params with no OpenAI API field reach vLLM through extra_body.
 
-Regression: a mode's top_k went only into GenerateConfig.top_k, which inspect's OpenAI-compatible provider drops,
-so every domyn/ request sampled without top-k (Qwen3.5-4B ships no generation_config.json to supply one).
+A mode is one of a model's two sampling tables, ``[<model>.generation.think]`` and ``[<model>.generation.nothink]``;
+``generation.reasoning`` selects which one its requests sample with.
+
+Regression: the selected mode's top_k went only into GenerateConfig.top_k, which inspect's OpenAI-compatible provider
+drops, so every domyn/ request sampled without top-k (Qwen3.5-4B ships no generation_config.json to supply one).
 """
 
 from inspect_ai.model import GenerateConfig

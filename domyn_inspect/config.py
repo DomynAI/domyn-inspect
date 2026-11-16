@@ -126,7 +126,7 @@ class ContextConfig:
     tokenizer_path: str | None = None
 
 
-# Each role's defaults, filled in under what its table sets: deterministic, as tau2 asks of its user simulator.
+# Each role's defaults, which its table overrides: deterministic sampling.
 ROLE_DEFAULTS: dict[str, dict[str, Any]] = {"user": {"temperature": 0.0}, "grader": {"temperature": 0.0}}
 
 
@@ -134,7 +134,9 @@ ROLE_DEFAULTS: dict[str, dict[str, Any]] = {"user": {"temperature": 0.0}, "grade
 class GenerationConfig:
     """``[<model>.generation]``: how a model's requests are built.
 
-    The model under test answers with ``mode``; the model playing a role samples with its table, over its ``mode``.
+    A mode is one of the two sampling tables ``think`` and ``nothink``; ``reasoning`` selects which one is used.
+    The model under test samples with its selected mode. A model playing an inspect model role (``user`` or
+    ``grader``) samples with that role's table, whose unset params fall back to its selected mode.
     """
 
     reasoning: bool = True  # selects think over nothink as mode
