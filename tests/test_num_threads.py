@@ -21,7 +21,7 @@ def _load(tmp_path, general="", inspect="", extra=""):
 @pytest.mark.parametrize(
     ("general", "inspect", "expected"),
     [
-        ("", "", 64),  # neither set: the general default
+        ("", "", 1),  # neither set: the general default
         ("num_threads = 96\n", "", 96),
         ("num_threads = 96\n", "num_threads = 12\n", 12),
     ],

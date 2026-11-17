@@ -89,9 +89,9 @@ class TasksConfig:
 class GeneralConfig:
     """``[general]``: the run's request settings."""
 
-    num_threads: int = 64  # concurrent requests; [inspect].num_threads defaults to it
+    num_threads: int = 1  # concurrent requests; [inspect].num_threads defaults to it
     request_timeout: int = 3600  # per-request read and connect timeout (s)
-    max_retries: int = 0  # inspect's retries of a failed request
+    max_retries: int = 0  # inspect's retries of a failed request, for every model: the role models inherit it
 
 
 @dataclass

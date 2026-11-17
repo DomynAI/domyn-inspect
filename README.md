@@ -131,8 +131,8 @@ The endpoint and generation settings. When run from domyn-eval, this is the run'
 ```toml
 [general]
 # request_timeout = 3600         # per-request read and connect timeout (s)
-# max_retries = 0                # inspect's retries of a failed request
-# num_threads = 64               # concurrent requests; default for [inspect].num_threads
+# max_retries = 0                # inspect's retries of a failed request, for every model, the roles' included
+# num_threads = 1                # concurrent requests; default for [inspect].num_threads
 
 [model]
 id = "domyn-edge"                # results subdirectory
