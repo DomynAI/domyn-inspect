@@ -7,12 +7,12 @@ from domyn_inspect.tasks import _long_context
 from domyn_inspect.tasks._long_context import DocumentTruncator, cut_middle, prompt_token_limit
 
 W = 32768
-# What core/runner.py:token_budget builds with a mode's min_completion_tokens set and no explicit cap
+# What core/runner.py:token_budget builds with a mode's completion_reserve set and no explicit cap
 BUDGET = {
     "max_model_len": W,
     "max_tokens": None,
     "token_safety_margin": 256,
-    "min_completion_tokens": 4096,
+    "completion_reserve": 4096,
     "tokenizer_path": "stub",
     "chat_template_kwargs": {},
 }
@@ -54,8 +54,8 @@ class SeamTokenizer(CharTokenizer):
         ({**BUDGET, "max_tokens": W}, W - 256 - 4096),  # max_tokens = window: implicit
         ({**BUDGET, "max_tokens": 20000}, W - 256 - 20000),  # explicit: all of it
         ({**BUDGET, "max_tokens": 1000}, W - 256 - 1000),
-        ({**BUDGET, "min_completion_tokens": None}, W - 256),  # unset: no reserve
-        ({**BUDGET, "token_safety_margin": 0, "min_completion_tokens": 8192}, W - 8192),
+        ({**BUDGET, "completion_reserve": None}, W - 256),  # unset: no reserve
+        ({**BUDGET, "token_safety_margin": 0, "completion_reserve": 8192}, W - 8192),
     ],
 )
 def test_prompt_token_limit(args, expected):
@@ -80,7 +80,7 @@ def use_tokenizer(monkeypatch, tokenizer):
 
 
 def truncator(monkeypatch, limit, tokenizer=...):
-    """A truncator whose prompt limit is ``limit`` (the reserve is min_completion_tokens, 4096)."""
+    """A truncator whose prompt limit is ``limit`` (the reserve is completion_reserve, 4096)."""
     use_tokenizer(monkeypatch, CharTokenizer() if tokenizer is ... else tokenizer)
     return DocumentTruncator({**BUDGET, "max_model_len": limit + 256 + 4096})
 

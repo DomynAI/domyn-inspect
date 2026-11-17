@@ -20,7 +20,7 @@ Notes:
 - a sample whose request fails, or whose first CoT step comes back empty, counts as wrong;
 - ``no_context`` asks with the question and choices only;
 - there is no RAG variant: the dataset has no retrieved context for it;
-- CoT is a task argument, independent of ``generation.reasoning``.
+- CoT is a task argument, independent of ``model.generation.reasoning``.
 """
 
 import re

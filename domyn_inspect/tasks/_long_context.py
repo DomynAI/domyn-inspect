@@ -13,12 +13,12 @@ the safety margin minus a completion reserve (``prompt_token_limit``):
 - an explicit ``max_tokens`` below the window is reserved in full. The provider would cut it to whatever a longer prompt
   leaves, so the request would not fail, but samples with long documents would get less room to answer than the rest;
   reserving it keeps every sample's completion budget the one configured;
-- otherwise, the selected mode's ``min_completion_tokens`` is kept: 8192 with reasoning on, 4096 off, when unset.
+- otherwise, ``context.completion_reserve`` is kept: 8192 with reasoning on, 4096 off, when unset.
 
 Without a tokenizer (or for a prompt the template cannot render) the count is a chars//4 estimate with a larger margin,
 as in the provider, and documents are cut by characters instead of tokens; a warning says so.
 
-The budget is the model config's ``[generation]`` values, with the cap inspect actually sends as ``max_tokens``, set by
+The budget is the ``[model.generation.context]`` values, with the cap inspect actually sends as ``max_tokens``, set by
 the runner before it builds the tasks (``runner.token_budget``, ``set_budget``). A task built without one (the
 login-node prefetch, a unit test) is not truncated.
 """
@@ -45,11 +45,11 @@ def prompt_token_limit(budget: dict[str, Any]) -> int:
     max_model_len = budget["max_model_len"]
     available = max_model_len - budget["token_safety_margin"]
     max_tokens = budget["max_tokens"] or 0
-    reserve = max_tokens if 0 < max_tokens < max_model_len else budget["min_completion_tokens"] or 0
+    reserve = max_tokens if 0 < max_tokens < max_model_len else budget["completion_reserve"] or 0
     if reserve >= available:
         msg = (
             f"a {max_model_len}-token window leaves no room for a prompt after reserving {reserve} completion tokens"
-            " (generation.max_tokens / min_completion_tokens)"
+            " (context.max_tokens / completion_reserve)"
         )
         raise ValueError(msg)
     return available - reserve

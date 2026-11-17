@@ -38,7 +38,7 @@ _COMPLETION_RE = re.compile(r"(\d+) in the completion\)|you requested (\d+) outp
 
 
 class ContextBudgetError(RuntimeError):
-    """generation.max_tokens does not fit the endpoint's --max-model-len."""
+    """model.generation.context.max_tokens does not fit the endpoint's --max-model-len."""
 
 
 def completion_budget_overflows(msg: str) -> bool | None:
@@ -60,8 +60,8 @@ def classify_context_error(model_name: str, msg: str) -> ModelOutput | Exception
         return None
     if completion_budget_overflows(msg):
         return ContextBudgetError(
-            f"generation.max_tokens is too large for this endpoint's context "
-            f"window, so every request will fail. Lower generation.max_tokens "
+            f"model.generation.context.max_tokens is too large for this endpoint's context "
+            f"window, so every request will fail. Lower model.generation.context.max_tokens "
             f"or raise the server's --max-model-len. Endpoint said: {msg}"
         )
     logger.warning("context length exceeded, scoring sample as empty: %s", msg)
