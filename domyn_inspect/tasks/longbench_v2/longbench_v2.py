@@ -161,7 +161,7 @@ def record_to_sample(
     def to_sample(record: dict[str, Any]) -> Sample:
         if no_context:
             prompt, budget_metadata = fill(template, record), {}
-        elif not max_len:
+        elif budget is None:
             prompt, budget_metadata = fill(template, record), {"prompt_tokens": None, "truncated": False}
         else:
             prompt, budget_metadata = truncate(fill(template, record), budget, max_len)
