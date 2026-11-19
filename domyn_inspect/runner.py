@@ -121,17 +121,14 @@ def sampling_extra_body(params: SamplingConfig) -> dict[str, Any]:
 
 
 def token_budget(tasks_cfg: TasksConfig, model_cfg: DomynInspectConfig) -> dict[str, Any]:
-    """The budget the long-context tasks truncate against and the provider clamps each request to.
+    """The run's budget: the window the provider clamps each request to and LongBench v2 cuts its prompts to.
 
-    Built from the model config alone, with the cap inspect actually sends (``effective_max_tokens``), so the
-    completion room a truncated prompt leaves is the room the request asks for.
+    Built from the model config alone, with the cap inspect actually sends (``effective_max_tokens``).
     """
     gen = model_cfg.model.generation
     return {
         "max_model_len": gen.context.max_model_len,
         "max_tokens": effective_max_tokens(tasks_cfg, model_cfg),
-        "token_safety_margin": gen.context.token_safety_margin,
-        "completion_reserve": gen.completion_reserve,
         "tokenizer_path": (gen.context.tokenizer_path or model_cfg.model.path).rstrip("/"),
         "chat_template_kwargs": gen.mode.chat_template_kwargs or {},
     }
@@ -149,7 +146,7 @@ def run_eval(
     from inspect_ai._util.http_defaults_httpx2 import DEFAULT_POOL_CONNECTIONS
 
     from domyn_inspect.resolver import resolve_tasks
-    from domyn_inspect.tasks import _long_context
+    from domyn_inspect.token_budget import set_run_budget
 
     # Some tasks call get_model() during instantiation (e.g. niah).
     # Set the env var so the model is available at resolve time.
@@ -170,9 +167,9 @@ def run_eval(
         str(Path(__file__).resolve().parents[1] / ".cache" / "tiktoken"),
     )
 
-    # Before resolving: the long-context tasks budget their prompts while they are built
+    # Before resolving: LongBench v2 cuts its prompts while they are built
     budget = token_budget(tasks_cfg, model_cfg)
-    _long_context.set_budget(budget)
+    set_run_budget(budget)
 
     click.echo("Resolving tasks …")
     # Scorers come back final: errored-sample handling, group breakdown and dual scoring are applied by the resolver.
