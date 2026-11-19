@@ -1,11 +1,16 @@
 # SPDX-FileCopyrightText: 2026 Domyn
 # SPDX-License-Identifier: Apache-2.0
 
-"""Prompt token counts, shared by the provider's ``max_tokens`` clamp and the long-context truncation.
+"""The run's token budget, and prompt token counts for the provider's ``max_tokens`` clamp.
+
+The budget is the ``[model.generation.context]`` window, the cap inspect actually sends as ``max_tokens``, and how
+prompts are tokenized (``runner.token_budget``). The runner hands it to the provider and, before it builds the tasks,
+sets it here (``set_run_budget``) for a task that sizes its prompts to the window (LongBench v2).
 
 A prompt is counted as the server renders it: through the model's chat template, with the run's template flags.
-Without a tokenizer, or for a prompt the template cannot render, the count is estimated from the prompt's characters
-(with a warning); an estimate misses the template's own tokens, so the margin kept on top of it grows with it.
+That count is exact, so it needs no margin. Without a tokenizer, or for a prompt the template cannot render, the
+count is estimated from the prompt's characters (with a warning); an estimate misses the template's own tokens, so
+it keeps half the estimate free on top of it.
 """
 
 import json
@@ -17,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 # Rough characters per token, for a prompt the tokenizer cannot count
 CHARS_PER_TOKEN = 4
+
+_run_budget: dict[str, Any] | None = None
+
+
+def set_run_budget(budget: dict[str, Any] | None) -> None:
+    """Set the run's budget, which ``run_budget`` returns from now on."""
+    global _run_budget
+    _run_budget = budget
+
+
+def run_budget() -> dict[str, Any] | None:
+    """The run's budget, or None outside a run (the login-node prefetch, a unit test)."""
+    return _run_budget
 
 
 @cache
@@ -70,8 +88,10 @@ def parse_tool_call_arguments(messages: list[Any]) -> list[Any]:
 
 
 def count_prompt(budget: dict[str, Any], messages: list[Any], tools: list[Any] | None = None) -> tuple[int, int]:
-    """``(prompt tokens, safety margin)`` for a request with these (OpenAI-format) messages and tools."""
-    margin = budget["token_safety_margin"]
+    """``(prompt tokens, margin)`` for a request with these (OpenAI-format) messages and tools.
+
+    The margin is the estimate's uncertainty: 0 for a count rendered with the chat template.
+    """
     tokenizer = load_tokenizer(budget["tokenizer_path"])
     if tokenizer is not None:
         try:
@@ -83,7 +103,7 @@ def count_prompt(budget: dict[str, Any], messages: list[Any], tools: list[Any] |
                 return_dict=False,
                 **budget["chat_template_kwargs"],
             )
-            return len(prompt), margin
+            return len(prompt), 0
         except Exception as ex:  # noqa: BLE001
             logger.warning(
                 "could not render the prompt with the chat template (%s: %s); counting it on a chars//%s estimate",
@@ -94,4 +114,4 @@ def count_prompt(budget: dict[str, Any], messages: list[Any], tools: list[Any] |
     chars = sum(len(str(message.get("content") or "")) for message in messages)
     chars += len(json.dumps(tools)) if tools else 0
     estimate = chars // CHARS_PER_TOKEN
-    return estimate, max(margin, estimate // 2)
+    return estimate, estimate // 2

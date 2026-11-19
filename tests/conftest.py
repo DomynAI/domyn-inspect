@@ -13,11 +13,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _reset_token_budget():
-    """``run_eval`` sets the long-context budget for the whole process; keep it out of later tests."""
+    """``run_eval`` sets the run's budget for the whole process; keep it out of later tests."""
     yield
-    from domyn_inspect.tasks import _long_context
+    from domyn_inspect.token_budget import set_run_budget
 
-    _long_context.set_budget(None)
+    set_run_budget(None)
 
 
 @pytest.fixture
