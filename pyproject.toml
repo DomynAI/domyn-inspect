@@ -34,6 +34,9 @@ dependencies = [
     "matplotlib",
     "transformers",
     "mini-swe-agent==2.4.6",
+    # web page and PDF -> Markdown, for web fetch tools
+    "markdownify>=1.2.3",
+    "pypdf>=7.0.1",
 ]
 
 [project.optional-dependencies]
