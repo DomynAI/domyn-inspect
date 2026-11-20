@@ -150,10 +150,8 @@ def test_the_new_formats_tell_a_full_window_budget_from_a_long_prompt():
 
 
 WINDOW = 32768
-MARGIN = 256
 BUDGET = {
     "max_model_len": WINDOW,
-    "token_safety_margin": MARGIN,
     "tokenizer_path": "/models/domynedge-sft",
     "chat_template_kwargs": {"enable_thinking": False},
 }
@@ -174,8 +172,8 @@ class FakeTokenizer:
 NO_TOKENIZER = None
 
 
-def _send(monkeypatch, max_tokens, prompt_tokens=100, budget=BUDGET, content="hello", tokenizer=...):
-    """The max_tokens the provider sends for a ``prompt_tokens``-token prompt, and the tokenizer that counted it."""
+def _generate(monkeypatch, max_tokens, prompt_tokens=100, budget=BUDGET, content="hello", tokenizer=...):
+    """``(output, max_tokens of each request sent, tokenizer)`` for a ``prompt_tokens``-token prompt."""
     tokenizer = FakeTokenizer(prompt_tokens) if tokenizer is ... else tokenizer
     loaded = []
 
@@ -190,12 +188,22 @@ def _send(monkeypatch, max_tokens, prompt_tokens=100, budget=BUDGET, content="he
     if budget:
         assert loaded == [budget["tokenizer_path"]]
 
+    sent = []
+
     async def generate(self, input, tools, tool_choice, config):  # noqa: A002, ARG001
+        sent.append(config.max_tokens)
         return ModelOutput.from_content(model="m", content=str(config.max_tokens)), None
 
     monkeypatch.setattr(OpenAICompatibleAPI, "generate", generate)
     config = GenerateConfig(max_tokens=max_tokens)
-    output, _ = asyncio.run(api.generate([ChatMessageUser(content=content)], [], "none", config))
+    result = asyncio.run(api.generate([ChatMessageUser(content=content)], [], "none", config))
+    output = result[0] if isinstance(result, tuple) else result
+    return output, sent, tokenizer
+
+
+def _send(monkeypatch, max_tokens, **kwargs):
+    """The max_tokens the provider sends, and the tokenizer that counted the prompt."""
+    output, _, tokenizer = _generate(monkeypatch, max_tokens, **kwargs)
     return output.completion, tokenizer
 
 
@@ -204,7 +212,8 @@ def test_a_cap_the_prompt_leaves_room_for_is_sent_as_is(monkeypatch):
 
 
 def test_a_cap_is_cut_to_what_the_prompt_leaves(monkeypatch):
-    sent, tokenizer = _send(monkeypatch, 8192, prompt_tokens=WINDOW - MARGIN - 2768)
+    # An exact count (rendered with the chat template) keeps no margin
+    sent, tokenizer = _send(monkeypatch, 8192, prompt_tokens=WINDOW - 2768)
     assert sent == "2768"
     [call] = tokenizer.calls
     assert call["conversation"] == [{"role": "user", "content": "hello"}]  # counted as sent
@@ -215,8 +224,17 @@ def test_a_cap_is_cut_to_what_the_prompt_leaves(monkeypatch):
     assert call["enable_thinking"] is False  # rendered with the run's template flags
 
 
-def test_a_prompt_that_fills_the_window_asks_for_one_token(monkeypatch):
-    assert _send(monkeypatch, 8192, prompt_tokens=WINDOW)[0] == "1"
+def test_however_few_tokens_the_prompt_leaves_are_used(monkeypatch):
+    assert _send(monkeypatch, 8192, prompt_tokens=WINDOW - 1)[0] == "1"
+
+
+@pytest.mark.parametrize("prompt_tokens", [WINDOW, WINDOW + 500])
+def test_a_prompt_that_fills_the_window_is_not_sent(monkeypatch, prompt_tokens):
+    output, sent, _ = _generate(monkeypatch, 8192, prompt_tokens=prompt_tokens)
+    assert sent == []
+    # What a vLLM context-length rejection maps to: react() stops on it
+    assert output.stop_reason == "model_length"
+    assert output.completion == ""
 
 
 def test_without_a_cap_the_server_budgets_the_request(monkeypatch):
@@ -252,7 +270,7 @@ def test_a_prompt_the_template_cannot_render_is_estimated(monkeypatch, caplog):
     assert "could not render the prompt" in caplog.text
 
 
-def test_a_short_estimate_keeps_the_configured_margin(monkeypatch):
-    # "hello" is a 1-token estimate; half of it is below the 256-token margin
-    sent, _ = _send(monkeypatch, 40000, tokenizer=NO_TOKENIZER)
-    assert sent == str(WINDOW - 1 - MARGIN)
+def test_an_estimate_keeps_half_of_itself_free(monkeypatch):
+    # "hello" * 400 is a 500-token estimate, which keeps 250 free
+    sent, _ = _send(monkeypatch, 40000, content="hello" * 400, tokenizer=NO_TOKENIZER)
+    assert sent == str(WINDOW - 500 - 250)
