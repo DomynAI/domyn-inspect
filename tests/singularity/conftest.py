@@ -82,6 +82,12 @@ def overlay_dir(tmp_path, monkeypatch) -> Path:
     return directory
 
 
+@pytest.fixture(autouse=True)
+def no_memory_limit(monkeypatch) -> None:
+    """Exec argv is unwrapped unless a test sets ``INSPECT_SINGULARITY_MEMORY_LIMIT_MB`` (it may come from ``.env``)."""
+    monkeypatch.delenv("INSPECT_SINGULARITY_MEMORY_LIMIT_MB", raising=False)
+
+
 @pytest.fixture
 def stub_sif(monkeypatch):
     """Skip the on-disk ``.sif`` existence check in ``sample_init``."""
