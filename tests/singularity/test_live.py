@@ -123,3 +123,14 @@ async def test_testbed_is_writable(sandbox):
         ["sh", "-c", 'git config --global --add safe.directory /testbed && f=$(git ls-files | head -1) && [ -w "$f" ]']
     )
     assert result.returncode == 0, f"/testbed is not writable in {SIF}: {result.stderr.strip()}"
+
+
+async def test_memory_limit_fails_the_runaway_not_the_sandbox(sandbox, monkeypatch):
+    """The cap reaches grandchildren (as with bash_session's shell): past it the allocation fails, under it works."""
+    monkeypatch.setenv("INSPECT_SINGULARITY_MEMORY_LIMIT_MB", "1024")
+    alloc = "python3 -c 'bytearray({} * 1024 * 1024)'"
+    over = await sandbox.exec(["sh", "-c", alloc.format(2048)], timeout=60)
+    assert not over.success, over.stderr
+    assert "MemoryError" in over.stderr, over.stderr
+    under = await sandbox.exec(["sh", "-c", alloc.format(256)], timeout=60)
+    assert under.success, under.stderr

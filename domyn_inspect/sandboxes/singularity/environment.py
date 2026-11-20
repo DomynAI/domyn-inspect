@@ -100,6 +100,15 @@ def _overlay_dir() -> Path:
     return directory
 
 
+def _memory_limit_kb() -> int | None:
+    """Per-process address-space cap for exec'd commands, in KB (``$INSPECT_SINGULARITY_MEMORY_LIMIT_MB``).
+
+    Unset means no cap.
+    """
+    configured = os.environ.get("INSPECT_SINGULARITY_MEMORY_LIMIT_MB")
+    return int(configured) * 1024 if configured else None
+
+
 async def _create_overlay(name: str, size_mb: int | None) -> Path | None:
     """Provision a sized ext3 overlay for one sample, or None for tmpfs mode."""
     if size_mb is None:
@@ -487,6 +496,11 @@ class SingularitySandboxEnvironment(SandboxEnvironment):
                 f"{timeout}s",
                 *cmd,
             ]
+
+        # If a memory limit is configured, prepend a ulimit to the command so it applies to the exec'd process.
+        limit_kb = _memory_limit_kb()
+        if limit_kb is not None:
+            cmd = ["sh", "-c", f'ulimit -v {limit_kb} && exec "$@"', "sh", *cmd]
 
         args = [
             "exec",
