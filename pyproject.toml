@@ -37,6 +37,8 @@ dependencies = [
     # web page and PDF -> Markdown, for web fetch tools
     "markdownify>=1.2.3",
     "pypdf>=7.0.1",
+    # Math verifier
+    "math-verify[antlr4_11_0]==0.9.0",
 ]
 
 [project.optional-dependencies]
