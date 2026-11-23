@@ -11,7 +11,6 @@ import pytest
 from inspect_ai.model import ChatMessageUser, GenerateConfig, ModelOutput, get_model
 from inspect_ai.model._providers.openai_compatible import OpenAICompatibleAPI
 
-import domyn_inspect.provider  # registers domyn/
 import domyn_inspect.token_budget
 from domyn_inspect.provider import (
     ContextBudgetError,
@@ -169,24 +168,11 @@ class FakeTokenizer:
         return [0] * self.prompt_tokens
 
 
-NO_TOKENIZER = None
-
-
-def _generate(monkeypatch, max_tokens, prompt_tokens=100, budget=BUDGET, content="hello", tokenizer=...):
+def _generate(monkeypatch, max_tokens, prompt_tokens=100, budget=BUDGET, content="hello"):
     """``(output, max_tokens of each request sent, tokenizer)`` for a ``prompt_tokens``-token prompt."""
-    tokenizer = FakeTokenizer(prompt_tokens) if tokenizer is ... else tokenizer
-    loaded = []
-
-    def load(path):
-        loaded.append(path)
-        return tokenizer
-
-    # The provider loads it up front; count_prompt (core/token_budget.py) counts with it
-    monkeypatch.setattr(domyn_inspect.provider, "load_tokenizer", load)
+    tokenizer = FakeTokenizer(prompt_tokens)
     monkeypatch.setattr(domyn_inspect.token_budget, "load_tokenizer", lambda path: tokenizer)  # noqa: ARG005
     api = DomynOpenAIAPI("domyn/domynedge-sft", base_url="http://localhost:1/v1", budget=budget)
-    if budget:
-        assert loaded == [budget["tokenizer_path"]]
 
     sent = []
 
@@ -248,29 +234,3 @@ def test_a_model_without_a_budget_sends_its_cap_as_is(monkeypatch):
     sent, tokenizer = _send(monkeypatch, 8192, prompt_tokens=WINDOW, budget=None)
     assert sent == "8192"
     assert tokenizer.calls == []
-
-
-# 40k characters: a 10k-token estimate, which keeps 5k free on top
-LONG = "x" * 40_000
-
-
-def test_without_a_tokenizer_the_prompt_is_estimated(monkeypatch):
-    sent, _ = _send(monkeypatch, 30000, content=LONG, tokenizer=NO_TOKENIZER)
-    assert sent == str(WINDOW - 10_000 - 5_000)
-
-
-def test_a_prompt_the_template_cannot_render_is_estimated(monkeypatch, caplog):
-    class BrokenTemplate:
-        def apply_chat_template(self, conversation, **_kwargs):  # noqa: ARG002
-            msg = "bad template"
-            raise ValueError(msg)
-
-    sent, _ = _send(monkeypatch, 30000, content=LONG, tokenizer=BrokenTemplate())
-    assert sent == str(WINDOW - 10_000 - 5_000)
-    assert "could not render the prompt" in caplog.text
-
-
-def test_an_estimate_keeps_half_of_itself_free(monkeypatch):
-    # "hello" * 400 is a 500-token estimate, which keeps 250 free
-    sent, _ = _send(monkeypatch, 40000, content="hello" * 400, tokenizer=NO_TOKENIZER)
-    assert sent == str(WINDOW - 500 - 250)

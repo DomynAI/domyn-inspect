@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import sys
@@ -120,18 +121,60 @@ def sampling_extra_body(params: SamplingConfig) -> dict[str, Any]:
     return extra_body
 
 
-def token_budget(tasks_cfg: TasksConfig, model_cfg: DomynInspectConfig) -> dict[str, Any]:
-    """The run's budget: the window the provider clamps each request to and LongBench v2 cuts its prompts to.
-
-    Built from the model config alone, with the cap inspect actually sends (``effective_max_tokens``).
-    """
+def token_budget(model_cfg: DomynInspectConfig) -> dict[str, Any]:
+    """The window the provider clamps each request's ``max_tokens`` to, and how it counts the prompt."""
     gen = model_cfg.model.generation
     return {
         "max_model_len": gen.context.max_model_len,
-        "max_tokens": effective_max_tokens(tasks_cfg, model_cfg),
-        "tokenizer_path": (gen.context.tokenizer_path or model_cfg.model.path).rstrip("/"),
+        "tokenizer_path": tokenizer_path(model_cfg),
         "chat_template_kwargs": gen.mode.chat_template_kwargs or {},
     }
+
+
+def tokenizer_path(model_cfg: DomynInspectConfig) -> str:
+    """The tokenizer prompts are counted with: ``context.tokenizer_path``, else the model's path."""
+    context = model_cfg.model.generation.context
+    return (context.tokenizer_path or model_cfg.model.path).rstrip("/")
+
+
+def _task_params(name: str) -> list[str]:
+    """The arguments the task registered as ``name`` takes; none for a name inspect does not know."""
+    from inspect_ai._util.registry import registry_info, registry_lookup
+
+    task = registry_lookup("task", name)
+    return registry_info(task).metadata["params"] if task else []
+
+
+def inject_prompt_limits(tasks_cfg: TasksConfig, model_cfg: DomynInspectConfig) -> TasksConfig:
+    """``tasks_cfg`` with the prompt limit filled in for each task that cuts its prompts to the window.
+
+    A task that takes ``max_prompt_tokens`` (LongBench v2) and whose entry sets none gets the window less the
+    ``max_tokens`` it sends, and ``tokenizer``, the model's, unless the entry sets one. The limit is a task argument,
+    so it is recorded in the eval log's task args.
+
+    Raises:
+        ValueError: If such a task sends no ``max_tokens`` below the window.
+    """
+    window = model_cfg.model.generation.context.max_model_len
+    run_max_tokens = effective_max_tokens(tasks_cfg, model_cfg)
+    entries = []
+    for entry in tasks_cfg.tasks:
+        params = _task_params(entry.task)
+        task_args = dict(entry.task_args)
+        if "max_prompt_tokens" in params and "max_prompt_tokens" not in task_args:
+            # A run's max_tokens is a hard limit on the answer, so the prompt may have the rest of the window
+            max_tokens = int(entry.generate.get("max_tokens") or run_max_tokens or 0)  # type: ignore[arg-type]
+            if not 0 < max_tokens < window:
+                msg = (
+                    f"{entry.task} cuts its prompts to what max_tokens leaves of the {window}-token window: set "
+                    "model.generation.context.max_tokens below the window, or the task's max_prompt_tokens"
+                )
+                raise ValueError(msg)
+            task_args["max_prompt_tokens"] = window - max_tokens
+        if task_args.get("max_prompt_tokens") is not None and "tokenizer" in params and "tokenizer" not in task_args:
+            task_args["tokenizer"] = tokenizer_path(model_cfg)
+        entries.append(dataclasses.replace(entry, task_args=task_args))
+    return dataclasses.replace(tasks_cfg, tasks=entries)
 
 
 def run_eval(
@@ -146,7 +189,7 @@ def run_eval(
     from inspect_ai._util.http_defaults_httpx2 import DEFAULT_POOL_CONNECTIONS
 
     from domyn_inspect.resolver import resolve_tasks
-    from domyn_inspect.token_budget import set_run_budget
+    from domyn_inspect.token_budget import load_tokenizer
 
     # Some tasks call get_model() during instantiation (e.g. niah).
     # Set the env var so the model is available at resolve time.
@@ -167,9 +210,8 @@ def run_eval(
         str(Path(__file__).resolve().parents[1] / ".cache" / "tiktoken"),
     )
 
-    # Before resolving: LongBench v2 cuts its prompts while they are built
-    budget = token_budget(tasks_cfg, model_cfg)
-    set_run_budget(budget)
+    tasks_cfg = inject_prompt_limits(tasks_cfg, model_cfg)
+    budget = token_budget(model_cfg)
 
     click.echo("Resolving tasks …")
     # Scorers come back final: errored-sample handling, group breakdown and dual scoring are applied by the resolver.
@@ -186,6 +228,9 @@ def run_eval(
     for entry, task in zip(tasks_cfg.tasks, resolved, strict=True):
         if max_tokens is not None and "max_tokens" not in entry.generate:
             task.config = task.config.model_copy(update={"max_tokens": max_tokens})
+    if any(task.config.max_tokens for task in resolved):
+        # The provider counts every prompt sent with a cap: no tokenizer fails the run here, not each sample
+        load_tokenizer(budget["tokenizer_path"])
     gen_kwargs["presence_penalty"] = gen.mode.presence_penalty
     gen_kwargs["frequency_penalty"] = gen.mode.frequency_penalty
     gen_kwargs["extra_body"] = sampling_extra_body(gen.mode)
@@ -263,6 +308,7 @@ def print_dry_run(
     limit: int | None = None,
 ) -> None:
     """Show what *would* be executed without actually running."""
+    tasks_cfg = inject_prompt_limits(tasks_cfg, model_cfg)
     click.echo("\n[DRY-RUN]  The following tasks will be passed to eval_set():\n")
     for i, entry in enumerate(tasks_cfg.tasks, 1):
         label = entry.display_name or entry.task

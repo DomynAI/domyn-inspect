@@ -26,7 +26,7 @@ from inspect_ai.solver._task_state import sample_state
 from inspect_ai.tool import ToolChoice, ToolInfo
 from openai import APIStatusError
 
-from domyn_inspect.token_budget import count_prompt, load_tokenizer
+from domyn_inspect.token_budget import count_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -115,15 +115,13 @@ class DomynOpenAIAPI(OpenAICompatibleAPI):
 
         ``session_routing`` (a swarm-served model) sends each sample's requests with one session ID.
         """
-        # The run's token budget (core/runner.py:token_budget); the judge roles get none
+        # The run's token budget (runner.token_budget), whose tokenizer the runner loads up front when a task sends
+        # a cap; the judge roles get none
         self.budget = budget
         self.session_routing = session_routing
         # Per instance, not per endpoint: in self-play the agent and the user simulator
         # share one endpoint and model but hold different conversations.
         self.session_key = f"domyn_session:{uuid.uuid4().hex}"
-        if budget:
-            # Loaded (and cached) once here, not in the worker threads generate() counts in
-            load_tokenizer(budget["tokenizer_path"])
         super().__init__(
             model_name=model_name,
             base_url=base_url or os.getenv("_BASE_URL"),
@@ -184,9 +182,7 @@ class DomynOpenAIAPI(OpenAICompatibleAPI):
         if self.budget is None:
             error_msg = "Calling fit_max_tokens on a DomynOpenAIAPI instance with no budget"
             raise ValueError(error_msg)
-        prompt_tokens, margin = count_prompt(self.budget, messages, tools)
-        room = self.budget["max_model_len"] - prompt_tokens - margin
-        return min(max_tokens, room)
+        return min(max_tokens, self.budget["max_model_len"] - count_prompt(self.budget, messages, tools))
 
     @override
     def handle_bad_request(self, ex: APIStatusError) -> ModelOutput | Exception:

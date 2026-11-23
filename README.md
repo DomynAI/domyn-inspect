@@ -183,16 +183,18 @@ model under test (self-play); the grader role by `[judge]`, else by the model un
 `[user.generation.user]`, over that model's mode, capped by its `context.max_tokens`: 4096 by default for `[judge]` and
 `[user]`, but the model's own in self-play.
 
-LongBench v2 cuts the middle of a prompt that does not fit, as upstream does: its first and last `max_len // 2`
-tokens are kept. Upstream's `max_len` is a fixed number per model (mostly 120000); here it is `max_model_len` minus
-`max_tokens` when that is set below the window, else minus the task's `completion_reserve` argument (default 8192,
-e.g. `{ task = "inspect_evals/longbench_v2", task_args = { completion_reserve = 16384 } }`). No other task
-truncates: a prompt longer than the window fails as below.
+LongBench v2 cuts the middle of a prompt longer than its `max_prompt_tokens` argument, as upstream does: its first
+and last `max_prompt_tokens // 2` tokens are kept. Upstream's limit is a fixed number per model (mostly 120000); here
+the runner sets it to `max_model_len` minus the `max_tokens` the task sends, so the run needs a `max_tokens` below the
+window, or an explicit `task_args = { max_prompt_tokens = ... }`. It is a task argument, recorded in the eval log, and
+works with `inspect eval -T max_prompt_tokens=... -T tokenizer=...`. No other task truncates: a prompt longer than the
+window fails as below.
 
 Every request gets all the room its prompt leaves: a `max_tokens` cap is cut to `max_model_len` minus the
 prompt as the chat template renders it, with no margin and no minimum. A prompt that leaves no room is not sent; the
-sample stops with `stop_reason="model_length"`, as on vLLM's context-length rejection. Only a prompt counted without a
-tokenizer (a chars/4 estimate, with a warning) keeps half the estimate free.
+sample stops with `stop_reason="model_length"`, as on vLLM's context-length rejection. Counting needs the model's
+tokenizer (`tokenizer_path`, default `model.path`): a run that sends a cap, or cuts LongBench v2's prompts, fails at
+startup when it cannot load it.
 
 <details>
 <summary>Timeouts</summary>
