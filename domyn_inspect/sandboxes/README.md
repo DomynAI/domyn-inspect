@@ -42,7 +42,8 @@ nothing a sample writes reaches the image or another sample.
 6. **Exec.** Every `exec`, `read_file` and `write_file` is a `singularity exec --cleanenv instance://<instance> ...`.
    `--cleanenv` is needed on each call: `--containall` only cleans the environment at start, and without it a host
    variable such as `TMPDIR=/opt/...` leaks in and points at a path that does not exist inside. The
-   sandbox's own `env` is passed as `SINGULARITYENV_*`.
+   sandbox's own `env` is passed as `SINGULARITYENV_*`. With `INSPECT_SINGULARITY_MEMORY_LIMIT_MB` set, the command
+   runs under `ulimit -v` (see [Memory](#memory)).
 7. **Cleanup.** `sample_cleanup` stops the instance, then deletes the overlay file and the work directory. At task end,
    any instance still running is stopped; `inspect sandbox cleanup singularity` sweeps any that outlived their process.
 
@@ -68,6 +69,12 @@ nothing a sample writes reaches the image or another sample.
   concurrent samples, cap them with `INSPECT_SINGULARITY_MAX_SANDBOXES`, or point `INSPECT_SINGULARITY_OVERLAY_DIR` at
   local disk.
 
+### Memory
+
+`INSPECT_SINGULARITY_MEMORY_LIMIT_MB` caps every exec'd process and everything it spawns, `bash_session`'s shell
+included, with `ulimit -v`, so the runaway fails alone (`MemoryError`, failed `malloc`). Unset means no cap.
+The cap counts virtual memory, not resident memory, so leave headroom.
+
 ## Environment variables
 
 | Variable | Default | Purpose |
@@ -76,6 +83,7 @@ nothing a sample writes reaches the image or another sample.
 | `INSPECT_SINGULARITY_SIF_REFRESH` | unset | `1` re-pulls images already in the cache. |
 | `INSPECT_SINGULARITY_OVERLAY_DIR` | `/dev/shm` | Per-sample overlay files and work directories. |
 | `INSPECT_SINGULARITY_MAX_SANDBOXES` | inspect's default | Maximum number of concurrent sandboxes. |
+| `INSPECT_SINGULARITY_MEMORY_LIMIT_MB` | unset (no cap) | Per-process virtual memory cap of exec'd commands; see [Memory](#memory). |
 
 ## Tests
 

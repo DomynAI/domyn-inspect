@@ -254,6 +254,18 @@ class TestExec:
         with pytest.raises(env_mod.SandboxCmdTimeoutError):
             await make_env().exec(["sleep", "99"], timeout=30)
 
+    async def test_memory_limit_wraps_the_command_in_ulimit(self, fake_cli, monkeypatch):
+        monkeypatch.setenv("INSPECT_SINGULARITY_MEMORY_LIMIT_MB", "2048")
+        fake = fake_cli()
+        await make_env().exec(["echo", "hi"])
+        assert fake.command(0) == ["sh", "-c", 'ulimit -v 2097152 && exec "$@"', "sh", "echo", "hi"]
+
+    @pytest.mark.parametrize("value", ["2G", "2048MB", "1.5", "0", "-1"])
+    async def test_malformed_memory_limit_fails_at_task_init(self, monkeypatch, value):
+        monkeypatch.setenv("INSPECT_SINGULARITY_MEMORY_LIMIT_MB", value)
+        with pytest.raises(ValueError, match="INSPECT_SINGULARITY_MEMORY_LIMIT_MB must be a positive integer"):
+            await env_mod.SingularitySandboxEnvironment.task_init("task", None)
+
     async def test_config_env_and_per_call_env_merge_with_per_call_winning(self, fake_cli):
         fake = fake_cli()
         env = make_env(env=(("FROM_CONFIG", "c"), ("SHARED", "config")))
