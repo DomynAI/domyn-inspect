@@ -1,6 +1,7 @@
 """longbench_v2 (custom/longbench_v2/)."""
 
 import asyncio
+import importlib
 
 import pytest
 from inspect_ai._util.registry import registry_lookup
@@ -11,11 +12,16 @@ from inspect_ai.solver._task_state import TaskState
 import domyn_inspect.tasks  # noqa: F401 -- registers every tasks/<task>/'s @task(s)
 from domyn_inspect.tasks.longbench_v2.longbench_v2 import (
     answer_from_cot,
+    cut_middle,
     extract_answer,
     longbench_v2,
     longbench_v2_scorer,
     record_to_sample,
+    truncate,
 )
+
+# The module, not the task function the package re-exports under the same name
+module = importlib.import_module("domyn_inspect.tasks.longbench_v2.longbench_v2")
 
 RECORD = {
     "_id": "x1",
@@ -119,3 +125,78 @@ def test_empty_first_step_is_not_asked_again_and_scores_wrong():
     score = asyncio.run(longbench_v2_scorer()(state, Target("C")))
     assert score.value == INCORRECT
     assert score.metadata == {"extract_success": False}
+
+
+# Truncation, as upstream's pred.py cuts an overflowing prompt
+
+
+class CharTokenizer:
+    """One token per character."""
+
+    def encode(self, text, add_special_tokens=False):  # noqa: ARG002, FBT002
+        return [ord(c) for c in text]
+
+    def decode(self, ids, skip_special_tokens=True):  # noqa: ARG002, FBT002
+        return "".join(chr(i) for i in ids)
+
+
+@pytest.fixture
+def char_tokenizer(monkeypatch):
+    loaded = []
+    monkeypatch.setattr(module, "load_tokenizer", lambda path: loaded.append(path) or CharTokenizer())
+    return loaded
+
+
+def test_cut_middle_is_upstreams():
+    # input_ids[:max_len//2] + input_ids[-max_len//2:]: an odd max_len keeps one more token of the tail
+    assert cut_middle(list(range(10)), 5) == [0, 1, 7, 8, 9]
+    assert cut_middle(list(range(10)), 4) == [0, 1, 8, 9]
+    assert cut_middle(list(range(3)), 5) == [0, 1, 2]
+    assert cut_middle("abcdefghij", 4) == "abij"
+
+
+def test_a_prompt_that_fits_is_left_alone():
+    assert truncate("x" * 1000, CharTokenizer(), 1000) == ("x" * 1000, {"prompt_tokens": 1000, "truncated": False})
+
+
+def test_the_whole_prompt_loses_its_middle():
+    prompt = "Read this.\n" + "a" * 5000 + "b" * 5000 + "\nQuestion: which?"
+    cut, meta = truncate(prompt, CharTokenizer(), 1000)
+    assert cut == prompt[:500] + prompt[-500:]
+    assert cut.startswith("Read this.\n")
+    assert cut.endswith("b\nQuestion: which?")
+    assert meta == {"prompt_tokens": len(prompt), "truncated": True}
+
+
+LONG_RECORD = {**RECORD, "context": "a" * 50_000 + "b" * 50_000}
+
+
+def test_without_a_limit_nothing_is_cut(char_tokenizer):
+    sample = record_to_sample(cot=True, no_context=False)(LONG_RECORD)
+    assert LONG_RECORD["context"] in sample.input
+    assert (sample.metadata["prompt_tokens"], sample.metadata["truncated"]) == (None, False)
+    assert char_tokenizer == []  # nothing to count with
+
+
+def test_a_limit_cuts_the_prompt_with_the_tokenizer(char_tokenizer):
+    sample = record_to_sample(cot=True, no_context=False, max_prompt_tokens=20000, tokenizer="org/model")(LONG_RECORD)
+    assert len(sample.input) == 20000
+    assert sample.input.endswith("think step by step:")  # the question and choices survive
+    assert sample.metadata["truncated"]
+    assert char_tokenizer == ["org/model"]
+
+
+def test_the_task_passes_its_limit_to_the_samples(char_tokenizer, monkeypatch):
+    monkeypatch.setattr(module, "hf_dataset", lambda **kwargs: [kwargs["sample_fields"](LONG_RECORD)])
+    [sample] = longbench_v2(max_prompt_tokens=20000, tokenizer="org/model").dataset
+    assert len(sample.input) == 20000
+    assert char_tokenizer == ["org/model"]
+
+
+@pytest.mark.parametrize(
+    ("max_prompt_tokens", "tokenizer", "error"),
+    [(20000, None, "needs the tokenizer"), (0, "org/model", "no room for a prompt"), (-5, "org/model", "no room")],
+)
+def test_a_limit_without_a_tokenizer_or_room_fails(max_prompt_tokens, tokenizer, error):
+    with pytest.raises(ValueError, match=error):
+        record_to_sample(cot=True, no_context=False, max_prompt_tokens=max_prompt_tokens, tokenizer=tokenizer)

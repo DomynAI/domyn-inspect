@@ -5,7 +5,8 @@
 
 1. ``handle_bad_request`` -- context-length 400s from vLLM.
 2. ``generate`` -- an explicit max_tokens is cut to what the prompt leaves of the window
-   (window - prompt tokens - margin), counted before sending (``core/token_budget.py``).
+   (window - prompt tokens), counted before sending (``token_budget.py``). A prompt that
+   leaves no room is not sent: the sample stops as on vLLM's context-length rejection.
 3. ``generate`` -- with ``session_routing`` (a swarm-served model), each sample's requests
    carry one session ID, in ``X-Session-ID`` and ``session_params.session_id``.
 """
@@ -25,7 +26,7 @@ from inspect_ai.solver._task_state import sample_state
 from inspect_ai.tool import ToolChoice, ToolInfo
 from openai import APIStatusError
 
-from domyn_inspect.token_budget import count_prompt, load_tokenizer
+from domyn_inspect.token_budget import count_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -114,15 +115,13 @@ class DomynOpenAIAPI(OpenAICompatibleAPI):
 
         ``session_routing`` (a swarm-served model) sends each sample's requests with one session ID.
         """
-        # The run's token budget (core/runner.py:token_budget); the judge roles get none
+        # The run's token budget (runner.token_budget), whose tokenizer the runner loads up front when a task sends
+        # a cap; the judge roles get none
         self.budget = budget
         self.session_routing = session_routing
         # Per instance, not per endpoint: in self-play the agent and the user simulator
         # share one endpoint and model but hold different conversations.
         self.session_key = f"domyn_session:{uuid.uuid4().hex}"
-        if budget:
-            # Loaded (and cached) once here, not in the worker threads generate() counts in
-            load_tokenizer(budget["tokenizer_path"])
         super().__init__(
             model_name=model_name,
             base_url=base_url or os.getenv("_BASE_URL"),
@@ -145,8 +144,10 @@ class DomynOpenAIAPI(OpenAICompatibleAPI):
     ) -> ModelOutput | tuple[ModelOutput | Exception, ModelCall]:
         """Send an explicit max_tokens cut to what this prompt leaves of the window.
 
-        Without a cap nothing is sent and vLLM budgets the request itself. A prompt that
-        fills the window alone still fails, and the sample scores as empty.
+        However few tokens the prompt leaves, the request gets them all. A prompt that leaves none
+        is not sent: the output is the one vLLM's context-length rejection maps to
+        (``stop_reason="model_length"``), so an agent stops at once instead of asking again. Without a
+        cap nothing is counted and vLLM budgets the request itself, rejecting a prompt that fills the window.
 
         With session routing, the requests of a sample keep one session ID per instance: the
         request's own, if it sets one, else one kept in the sample's store.
@@ -166,18 +167,22 @@ class DomynOpenAIAPI(OpenAICompatibleAPI):
                 self.tools_to_openai(tools) if tools else None,
                 config.max_tokens,
             )
+            if max_tokens <= 0:
+                msg = f"the prompt leaves no room for a completion in the {self.budget['max_model_len']}-token window"
+                logger.warning("context length exceeded, scoring sample as empty: %s", msg)
+                return ModelOutput.from_content(
+                    model=self.service_model_name(), content="", stop_reason="model_length", error=msg
+                )
             if max_tokens < config.max_tokens:
                 config = config.model_copy(update={"max_tokens": max_tokens})
         return await super().generate(input, tools, tool_choice, config)
 
     def fit_max_tokens(self, messages: list[Any], tools: list[Any] | None, max_tokens: int) -> int:
-        """``max_tokens`` cut to what the prompt leaves of the window, at least 1."""
+        """``max_tokens`` cut to what the prompt leaves of the window; 0 or less when it leaves nothing."""
         if self.budget is None:
             error_msg = "Calling fit_max_tokens on a DomynOpenAIAPI instance with no budget"
             raise ValueError(error_msg)
-        prompt_tokens, margin = count_prompt(self.budget, messages, tools)
-        room = self.budget["max_model_len"] - prompt_tokens - margin
-        return max(1, min(max_tokens, room))
+        return min(max_tokens, self.budget["max_model_len"] - count_prompt(self.budget, messages, tools))
 
     @override
     def handle_bad_request(self, ex: APIStatusError) -> ModelOutput | Exception:

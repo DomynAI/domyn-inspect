@@ -111,18 +111,12 @@ class SamplingConfig:
     chat_template_kwargs: dict[str, Any] | None = None
 
 
-DEFAULT_COMPLETION_RESERVE = 4096
-DEFAULT_REASONING_COMPLETION_RESERVE = 8192
-
-
 @dataclass
 class ContextConfig:
     """``[<model>.generation.context]``: the context window and its budget."""
 
     max_tokens: int = 0  # cap sent with every request; 0 lets the server budget each one
     max_model_len: int = 0  # the server's --max-model-len; required for [model]
-    completion_reserve: int | None = None  # left for generation when long-context tasks truncate; None: default
-    token_safety_margin: int = 256  # tokens kept free when estimating the available token budget
     tokenizer_path: str | None = None
 
 
@@ -155,13 +149,6 @@ class GenerationConfig:
         """The params of role ``name`` (``user`` or ``grader``): its own, over the selected mode's."""
         own = {key: value for key, value in dataclasses.asdict(getattr(self, name)).items() if value is not None}
         return dataclasses.replace(self.mode, **own)
-
-    @property
-    def completion_reserve(self) -> int:
-        """Completion tokens long-context truncation leaves: ``context.completion_reserve``, else the mode's default."""
-        if self.context.completion_reserve is not None:
-            return self.context.completion_reserve
-        return DEFAULT_REASONING_COMPLETION_RESERVE if self.reasoning else DEFAULT_COMPLETION_RESERVE
 
 
 @dataclass
@@ -228,7 +215,7 @@ class DomynInspectConfig:
         if not max_model_len or max_model_len <= 0:
             msg = (
                 f"model.generation.context.max_model_len={max_model_len}: set it to the server's --max-model-len, "
-                "which every request and the long-context truncation are budgeted against"
+                "which every request and LongBench v2's truncation are budgeted against"
             )
             raise ValueError(msg)
 

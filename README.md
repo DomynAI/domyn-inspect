@@ -43,7 +43,7 @@ domyn-inspect makes it easier to integrate custom inspect-ai tasks with domyn-ev
 ### Run
 
 - **Context-aware budgets**: `max_tokens` cut to what the prompt leaves of the window
-- **Long-context truncation** inside the documents, keeping the question intact
+- **LongBench v2 truncation** as upstream's: the middle of an overflowing prompt is cut
 - **Offline-ready**: prefetch datasets and check they load without internet
 - **Docker-free sandboxes** on Singularity
 
@@ -153,9 +153,7 @@ top_p = 0.8
 [model.generation.context]
 max_model_len = 65536            # required: the server's --max-model-len
 max_tokens = 0                   # cap sent with every request; 0 lets the server budget each one
-# tokenizer_path = "..."         # counts prompt tokens for long-context truncation (default model.path)
-# token_safety_margin = 256      # tokens kept free when estimating the available budget
-# completion_reserve = 8192      # output room kept when long-context tasks truncate (default: 8192 think, 4096 nothink)
+# tokenizer_path = "..."         # counts prompt tokens for the budget and LongBench v2's cut (default model.path)
 
 [judge]                          # optional: plays the grader role, and the user role unless [user] is set
 path = "Qwen/Qwen3.5-9B"
@@ -185,9 +183,18 @@ model under test (self-play); the grader role by `[judge]`, else by the model un
 `[user.generation.user]`, over that model's mode, capped by its `context.max_tokens`: 4096 by default for `[judge]` and
 `[user]`, but the model's own in self-play.
 
-Long-context tasks cut the middle of their documents when a prompt does not fit. The prompt may use
-`max_model_len - token_safety_margin`, minus `max_tokens` when that is set below the window, else minus
-`completion_reserve`.
+LongBench v2 cuts the middle of a prompt longer than its `max_prompt_tokens` argument, as upstream does: its first
+and last `max_prompt_tokens // 2` tokens are kept. Upstream's limit is a fixed number per model (mostly 120000); here
+the runner sets it to `max_model_len` minus the `max_tokens` the task sends, so the run needs a `max_tokens` below the
+window, or an explicit `task_args = { max_prompt_tokens = ... }`. It is a task argument, recorded in the eval log, and
+works with `inspect eval -T max_prompt_tokens=... -T tokenizer=...`. No other task truncates: a prompt longer than the
+window fails as below.
+
+Every request gets all the room its prompt leaves: a `max_tokens` cap is cut to `max_model_len` minus the
+prompt as the chat template renders it, with no margin and no minimum. A prompt that leaves no room is not sent; the
+sample stops with `stop_reason="model_length"`, as on vLLM's context-length rejection. Counting needs the model's
+tokenizer (`tokenizer_path`, default `model.path`): a run that sends a cap, or cuts LongBench v2's prompts, fails at
+startup when it cannot load it.
 
 <details>
 <summary>Timeouts</summary>

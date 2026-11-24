@@ -1,27 +1,25 @@
 # SPDX-FileCopyrightText: 2026 Domyn
 # SPDX-License-Identifier: Apache-2.0
 
-"""Prompt token counts, shared by the provider's ``max_tokens`` clamp and the long-context truncation.
+"""Prompt token counts, for the provider's ``max_tokens`` clamp and LongBench v2's cut.
 
-A prompt is counted as the server renders it: through the model's chat template, with the run's template flags.
-Without a tokenizer, or for a prompt the template cannot render, the count is estimated from the prompt's characters
-(with a warning); an estimate misses the template's own tokens, so the margin kept on top of it grows with it.
+A prompt is counted as the server renders it: through the model's chat template, with the run's template flags, and
+the model's tokenizer. A tokenizer that cannot be loaded is an error, raised when the run starts
+(``runner.run_eval``), not a guess: an eval that cannot count its tokens is better not run.
 """
 
 import json
-import logging
 from functools import cache
 from typing import Any
 
-logger = logging.getLogger(__name__)
 
-# Rough characters per token, for a prompt the tokenizer cannot count
-CHARS_PER_TOKEN = 4
+class TokenizerError(RuntimeError):
+    """The model's tokenizer cannot be loaded."""
 
 
 @cache
-def load_tokenizer(path: str) -> Any | None:  # noqa: ANN401
-    """The tokenizer at ``path``, or None (warned once per path) when it cannot be loaded."""
+def load_tokenizer(path: str) -> Any:  # noqa: ANN401
+    """The tokenizer at ``path``; raises ``TokenizerError`` when it cannot be loaded."""
     from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
     try:
@@ -31,15 +29,12 @@ def load_tokenizer(path: str) -> Any | None:  # noqa: ANN401
             # AutoTokenizer also loads the model config, whose remote code may not run on this venv's transformers
             # (e.g. a checkpoint written against 4.x); the tokenizer itself only needs tokenizer.json
             return PreTrainedTokenizerFast.from_pretrained(path)
-    except Exception as ex:  # noqa: BLE001
-        logger.warning(
-            "no tokenizer at %r (%s: %s); counting prompts on a chars//%s estimate",
-            path,
-            type(ex).__name__,
-            ex,
-            CHARS_PER_TOKEN,
+    except Exception as ex:
+        msg = (
+            f"no tokenizer at {path!r} ({type(ex).__name__}: {ex}); point model.generation.context.tokenizer_path "
+            "at the served model's tokenizer"
         )
-        return None
+        raise TokenizerError(msg) from ex
 
 
 def parse_tool_call_arguments(messages: list[Any]) -> list[Any]:
@@ -69,29 +64,17 @@ def parse_tool_call_arguments(messages: list[Any]) -> list[Any]:
     return parsed
 
 
-def count_prompt(budget: dict[str, Any], messages: list[Any], tools: list[Any] | None = None) -> tuple[int, int]:
-    """``(prompt tokens, safety margin)`` for a request with these (OpenAI-format) messages and tools."""
-    margin = budget["token_safety_margin"]
-    tokenizer = load_tokenizer(budget["tokenizer_path"])
-    if tokenizer is not None:
-        try:
-            prompt = tokenizer.apply_chat_template(
-                parse_tool_call_arguments(messages),
-                tools=tools,
-                tokenize=True,
-                add_generation_prompt=True,
-                return_dict=False,
-                **budget["chat_template_kwargs"],
-            )
-            return len(prompt), margin
-        except Exception as ex:  # noqa: BLE001
-            logger.warning(
-                "could not render the prompt with the chat template (%s: %s); counting it on a chars//%s estimate",
-                type(ex).__name__,
-                ex,
-                CHARS_PER_TOKEN,
-            )
-    chars = sum(len(str(message.get("content") or "")) for message in messages)
-    chars += len(json.dumps(tools)) if tools else 0
-    estimate = chars // CHARS_PER_TOKEN
-    return estimate, max(margin, estimate // 2)
+def count_prompt(budget: dict[str, Any], messages: list[Any], tools: list[Any] | None = None) -> int:
+    """The prompt tokens of a request with these (OpenAI-format) messages and tools, rendered as the server will.
+
+    A prompt the chat template cannot render raises: the server renders it with the same template.
+    """
+    prompt = load_tokenizer(budget["tokenizer_path"]).apply_chat_template(
+        parse_tool_call_arguments(messages),
+        tools=tools,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_dict=False,
+        **budget["chat_template_kwargs"],
+    )
+    return len(prompt)
