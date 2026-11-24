@@ -103,10 +103,15 @@ def _overlay_dir() -> Path:
 def _memory_limit_kb() -> int | None:
     """Per-process address-space cap for exec'd commands, in KB (``$INSPECT_SINGULARITY_MEMORY_LIMIT_MB``).
 
-    Unset means no cap.
+    Unset means no cap. Anything but a positive integer number of MB (e.g. ``2G``) is rejected.
     """
-    configured = os.environ.get("INSPECT_SINGULARITY_MEMORY_LIMIT_MB")
-    return int(configured) * 1024 if configured else None
+    configured = os.environ.get("INSPECT_SINGULARITY_MEMORY_LIMIT_MB", "").strip()
+    if not configured:
+        return None
+    if not configured.isdigit() or int(configured) <= 0:
+        msg = f"INSPECT_SINGULARITY_MEMORY_LIMIT_MB must be a positive integer of MB (e.g. 2048), got {configured!r}"
+        raise ValueError(msg)
+    return int(configured) * 1024
 
 
 async def _create_overlay(name: str, size_mb: int | None) -> Path | None:
@@ -279,7 +284,8 @@ class SingularitySandboxEnvironment(SandboxEnvironment):
     @override
     @classmethod
     async def task_init(cls, task_name: str, config: SandboxEnvironmentConfigType | None) -> None:
-        # Pull the image (or check the local sif exists) once, before any sample starts.
+        # Validate the memory limit and pull the image (or check the local sif exists) once, before any sample starts.
+        _memory_limit_kb()
         await cls._resolve_sif(resolve_config(config))
 
     @override
