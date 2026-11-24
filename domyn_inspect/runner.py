@@ -64,6 +64,7 @@ def _build_model_roles(model_cfg: DomynInspectConfig, *, client_timeout: float) 
             ),
             max_retries=0,
             client_timeout=client_timeout,
+            session_routing=bool(player.swarm_name),
         )
 
     return {role: _role_model(role, player) for role, (_, player) in _role_players(model_cfg).items()}
@@ -231,7 +232,12 @@ def run_eval(
         model=f"domyn/{model_cfg.model.path}",
         model_base_url=model_cfg.model.url,
         model_roles=model_roles,
-        model_args={"max_retries": 0, "client_timeout": http_timeout_s, "budget": budget},
+        model_args={
+            "max_retries": 0,
+            "client_timeout": http_timeout_s,
+            "budget": budget,
+            "session_routing": bool(model_cfg.model.swarm_name),
+        },
         max_tasks=tasks_cfg.general.max_tasks,
         max_connections=model_cfg.inspect.num_threads,
         retry_attempts=tasks_cfg.general.retry_attempts,

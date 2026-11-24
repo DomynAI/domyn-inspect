@@ -170,12 +170,14 @@ class ModelConfig:
 
     Attributes:
         id: The model's id, which keys its results directory.
+        swarm_name: The domyn-swarm deployment serving the model; its requests then carry a session ID.
         path: The weights, or a HF hub id; the model name sent to the endpoint.
         url: The OpenAI-compatible base URL; ``/v1`` is appended if missing.
         generation: How its requests are built.
     """
 
     id: str | None = None
+    swarm_name: str | None = None
     path: str = ""
     url: str | None = None
     generation: GenerationConfig = field(default_factory=GenerationConfig)

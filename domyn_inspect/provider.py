@@ -1,11 +1,13 @@
 # SPDX-FileCopyrightText: 2026 Domyn
 # SPDX-License-Identifier: Apache-2.0
 
-"""The ``domyn/<model>`` provider: inspect's OpenAI-compatible API, plus two fixes.
+"""The ``domyn/<model>`` provider: inspect's OpenAI-compatible API, plus three fixes.
 
 1. ``handle_bad_request`` -- context-length 400s from vLLM.
 2. ``generate`` -- an explicit max_tokens is cut to what the prompt leaves of the window
    (window - prompt tokens - margin), counted before sending (``core/token_budget.py``).
+3. ``generate`` -- with ``session_routing`` (a swarm-served model), each sample's requests
+   carry one session ID, in ``X-Session-ID`` and ``session_params.session_id``.
 """
 
 from __future__ import annotations
@@ -14,10 +16,12 @@ import asyncio
 import logging
 import os
 import re
+import uuid
 from typing import Any, override
 
 from inspect_ai.model import ChatMessage, GenerateConfig, ModelAPI, ModelCall, ModelOutput, modelapi
 from inspect_ai.model._providers.openai_compatible import OpenAICompatibleAPI
+from inspect_ai.solver._task_state import sample_state
 from inspect_ai.tool import ToolChoice, ToolInfo
 from openai import APIStatusError
 
@@ -68,6 +72,31 @@ def classify_context_error(model_name: str, msg: str) -> ModelOutput | Exception
     return ModelOutput.from_content(model=model_name, content="", stop_reason="model_length", error=msg)
 
 
+def _request_session_id(config: GenerateConfig) -> str | None:
+    """The session ID a request already sets, in its ``X-Session-ID`` header or ``session_params``.
+
+    Raises:
+        ValueError: If the header and the body set different IDs.
+    """
+    params = dict((config.extra_body or {}).get("session_params") or {})
+    header_id = next((v for k, v in (config.extra_headers or {}).items() if k.lower() == "x-session-id"), None)
+    session_id = params.get("session_id") or header_id
+    if header_id and session_id != header_id:
+        msg = "X-Session-ID and session_params.session_id differ. Set both fields to the same session ID."
+        raise ValueError(msg)
+    return session_id
+
+
+def _session_config(config: GenerateConfig, session_id: str) -> GenerateConfig:
+    """A copy of ``config`` sending ``session_id`` in the ``X-Session-ID`` header and ``session_params``."""
+    headers = {k: v for k, v in (config.extra_headers or {}).items() if k.lower() != "x-session-id"}
+    headers["X-Session-ID"] = session_id
+    body = dict(config.extra_body or {})
+    params = dict(body.get("session_params") or {})
+    body["session_params"] = {**params, "session_id": session_id}
+    return config.model_copy(update={"extra_headers": headers, "extra_body": body})
+
+
 class DomynOpenAIAPI(OpenAICompatibleAPI):
     """inspect's OpenAI-compatible API with context-length handling and a per-prompt ``max_tokens`` clamp."""
 
@@ -78,11 +107,19 @@ class DomynOpenAIAPI(OpenAICompatibleAPI):
         api_key: str | None = None,
         config: GenerateConfig | None = None,
         budget: dict[str, Any] | None = None,
+        session_routing: bool = False,  # noqa: FBT002 - a model arg, passed by name
         **model_args: Any,  # noqa: ANN401
     ) -> None:
-        """Create the API client; ``budget`` enables the ``max_tokens`` clamp, ``model_args`` go to inspect."""
+        """Create the API client; ``budget`` enables the ``max_tokens`` clamp, ``model_args`` go to inspect.
+
+        ``session_routing`` (a swarm-served model) sends each sample's requests with one session ID.
+        """
         # The run's token budget (core/runner.py:token_budget); the judge roles get none
         self.budget = budget
+        self.session_routing = session_routing
+        # Per instance, not per endpoint: in self-play the agent and the user simulator
+        # share one endpoint and model but hold different conversations.
+        self.session_key = f"domyn_session:{uuid.uuid4().hex}"
         if budget:
             # Loaded (and cached) once here, not in the worker threads generate() counts in
             load_tokenizer(budget["tokenizer_path"])
@@ -110,7 +147,17 @@ class DomynOpenAIAPI(OpenAICompatibleAPI):
 
         Without a cap nothing is sent and vLLM budgets the request itself. A prompt that
         fills the window alone still fails, and the sample scores as empty.
+
+        With session routing, the requests of a sample keep one session ID per instance: the
+        request's own, if it sets one, else one kept in the sample's store.
         """
+        if self.session_routing:
+            session_id = _request_session_id(config)
+            if not session_id:
+                state = sample_state()
+                new_id = uuid.uuid4().hex
+                session_id = state.store.get(self.session_key, new_id) if state is not None else new_id
+            config = _session_config(config, session_id)
         if config.max_tokens and self.budget:
             # Rendering a long prompt blocks; off the event loop every other request shares
             max_tokens = await asyncio.to_thread(
