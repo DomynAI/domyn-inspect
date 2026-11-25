@@ -9,6 +9,7 @@ from inspect_ai.scorer import match
 from inspect_ai.scorer._reducer import reducer_log_name
 
 from domyn_inspect.config import TaskEntry
+from domyn_inspect.reducers import g_pass_reducer_names
 from domyn_inspect.resolver import resolve_task
 
 
@@ -78,3 +79,20 @@ def test_no_pass_k_leaves_epochs_untouched():
 def test_pass_k_rejects_non_positive():
     with pytest.raises(ValueError, match="pass_k"):
         resolve_task(TaskEntry(task="tests/pass_k_dummy", pass_k=0))
+
+
+def test_g_pass_adds_reducers_from_k_2():
+    t = resolve_task(TaskEntry(task="tests/pass_k_dummy", pass_k=4, g_pass=True))
+    assert _reducer_names(t) == [
+        "mean",
+        "pass_at_1",
+        "pass_at_2",
+        "pass_at_4",
+        *g_pass_reducer_names(2),
+        *g_pass_reducer_names(4),
+    ]
+
+
+def test_g_pass_needs_pass_k():
+    with pytest.raises(ValueError, match="g_pass needs pass_k"):
+        resolve_task(TaskEntry(task="tests/pass_k_dummy", g_pass=True))

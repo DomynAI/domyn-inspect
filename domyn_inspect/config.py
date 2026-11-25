@@ -33,6 +33,8 @@ class TaskEntry:
         message_limit: Optional cap on messages per sample, set on the ``Task``.
         pass_k: Optional k for pass@k.  Runs ``k`` epochs per sample and reduces
             them with ``mean`` plus ``pass_at_<v>`` for v in 1, 2, 4, …, k.
+        g_pass: With ``pass_k``, also report G-Pass@v (τ = 0.5, 0.75, 1.0) and
+            mG-Pass@v for v in 2, 4, …, k (see reducers.py).
         dual_score: Add a ``loose_<scorer>`` scorer with robust answer extraction
             next to each upstream scorer that has one (see scoring.py).
     """
@@ -43,7 +45,14 @@ class TaskEntry:
     generate: dict[str, object] = field(default_factory=dict)
     message_limit: int | None = None
     pass_k: int | None = None
+    g_pass: bool = False
     dual_score: bool = False
+
+    def __post_init__(self) -> None:
+        """Reject ``g_pass`` without ``pass_k``: G-Pass@k reduces the epochs that ``pass_k`` runs."""
+        if self.g_pass and self.pass_k is None:
+            msg = f"{self.task}: g_pass needs pass_k"
+            raise ValueError(msg)
 
 
 @dataclass
@@ -265,6 +274,7 @@ def load_tasks_config(path: str) -> TasksConfig:
             generate=dict(entry.get("generate", {})),
             message_limit=entry.get("message_limit"),
             pass_k=entry.get("pass_k"),
+            g_pass=bool(entry.get("g_pass", False)),
             dual_score=bool(entry.get("dual_score", False)),
         )
         for entry in raw.get("tasks", [])
