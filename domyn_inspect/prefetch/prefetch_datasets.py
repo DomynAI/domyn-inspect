@@ -51,25 +51,27 @@ def _report(failures: list[tuple[str, str]], where: str) -> None:
         print(f"  - {name}: {error}", file=sys.stderr)
 
 
-def prefetch(toml_path: str, *, offline: bool = False) -> int:
-    """Build the tasks in ``toml_path`` online, then check them offline in a subprocess; return the exit code."""
-    if offline:
-        failures = build_tasks(toml_path)
-        if failures:
-            _report(failures, "offline: their datasets are missing from the cache")
-        return 1 if failures else 0
-
+def _run_prefetch(toml_path: str, *, offline: bool = False) -> int:
     for flag in OFFLINE_FLAGS:
-        os.environ[flag] = "0"
-    print(f"Building the tasks in {toml_path} online:")
+        os.environ[flag] = str(int(offline))
     if failures := build_tasks(toml_path):
-        _report(failures, "online")
+        _report(failures, "offline: their datasets are missing from the cache" if offline else "online")
         return 1
+    return 0
+
+
+def prefetch(toml_path: str, *, offline: bool = False) -> int:
+    """Build the task in ``toml_path`` in online or offline mode, depending on the input flag, and return the exit code.
+
+    If the tasks are built online, also check them offline in a subprocess.
+    """
+    retcode = _run_prefetch(toml_path, offline=offline)
+    if offline or retcode > 0:
+        return retcode
 
     print("\nChecking the same tasks build offline:", flush=True)
-    env = {**os.environ, **dict.fromkeys(OFFLINE_FLAGS, "1")}
     command = [sys.executable, "-m", "domyn_inspect.prefetch.prefetch_datasets", "--tasks", toml_path, "--offline"]
-    return subprocess.run(command, env=env, check=False).returncode
+    return subprocess.run(command, check=False).returncode
 
 
 if __name__ == "__main__":

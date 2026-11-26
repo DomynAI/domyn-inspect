@@ -1,0 +1,31 @@
+Bootstrap: docker
+From: python:3.11-slim
+
+%post
+    # Create the working directory (WORKDIR /app)
+    mkdir -p /app
+
+    # Install necessary tools for livecodebench environment
+    apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        tmux \
+        asciinema \
+        python3-pip \
+        python3-venv \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Install Python packages commonly used in competitive programming
+    # pip3 install pytest numpy
+
+    # Make sure we can run Python scripts (use -sf to avoid errors if symlink already exists)
+    ln -sf /usr/bin/python3 /usr/bin/python
+
+    # Match root permissions from Dockerfile
+    chmod 777 /
+
+%environment
+    export LC_ALL=C
+
+%runscript
+    cd /app
+    exec "$@"

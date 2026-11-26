@@ -39,6 +39,7 @@ dependencies = [
     "pypdf>=7.0.1",
     # Math verifier
     "math-verify[antlr4_11_0]==0.9.0",
+    "inspect-harbor>=1.0.0",
 ]
 
 [project.optional-dependencies]
