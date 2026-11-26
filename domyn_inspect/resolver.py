@@ -15,13 +15,16 @@ from inspect_ai.scorer import Scorer
 from inspect_ai.scorer._reducer import create_reducers, reducer_log_name
 
 from domyn_inspect.config import TaskEntry, TasksConfig
+from domyn_inspect.reducers import g_pass_reducer_names
 from domyn_inspect.scoring import answer_errored_samples, dual_scorers, with_group_metrics
 
 
-def _pass_k_epochs(task: Task, k: int) -> Epochs:
+def _pass_k_epochs(task: Task, k: int, *, g_pass: bool = False) -> Epochs:
     """Run ``max(epochs, k)`` epochs and append ``pass_at_1, 2, 4, …, k`` after the task's own reducers.
 
     pass@1 equals mean only for binary scores: it counts a sample as passed iff score == 1.0.
+    ``g_pass`` also appends G-Pass@v and mG-Pass@v (reducers.py) for every v >= 2 of the same ladder; at v = 1 they
+    all equal pass@1.
     """
     if k < 1:
         msg = f"pass_k must be >= 1, got {k}"
@@ -35,6 +38,8 @@ def _pass_k_epochs(task: Task, k: int) -> Epochs:
     reducers = task.epochs_reducer or create_reducers(["mean"])
     present = {reducer_log_name(r) for r in reducers}
     extra = [f"pass_at_{v}" for v in k_values if f"pass_at_{v}" not in present]
+    if g_pass:
+        extra += [name for v in k_values if v >= 2 for name in g_pass_reducer_names(v) if name not in present]
     return Epochs(max(task.epochs or 1, k), reducers + create_reducers(extra))
 
 
@@ -68,7 +73,7 @@ def resolve_task(entry: TaskEntry) -> Task:
     display_name = entry.display_name
     if entry.pass_k is not None:
         # eval_set's task identity ignores epochs: without a rename, a plain run's log counts as done
-        changes["epochs"] = _pass_k_epochs(task, entry.pass_k)
+        changes["epochs"] = _pass_k_epochs(task, entry.pass_k, g_pass=entry.g_pass)
         changes["name"] = f"{task.name}_pass_k"
         display_name = display_name or changes["name"].rsplit("/", 1)[-1]
 
