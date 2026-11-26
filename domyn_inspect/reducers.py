@@ -50,7 +50,9 @@ def g_pass_reducer_names(k: int) -> list[str]:
 
 def _at_least(n: int, c: int, k: int, m: int) -> float:
     """P(at least m of k epochs drawn without replacement from n, c of them correct, are correct)."""
-    return sum(comb(c, j) * comb(n - c, k - j) for j in range(m, k + 1)) / comb(n, k)
+    # Eq. 5 sums j up to c, but terms with j > k are also zero (can't draw more than k correct). Bounding by min(c, k)
+    # skips both empty ranges, and is required: math.comb raises on the negative k - j that j > k would give.
+    return sum(comb(c, j) * comb(n - c, k - j) for j in range(m, min(c, k) + 1)) / comb(n, k)
 
 
 def _g_pass(k: int, tau: int) -> Callable[[int, int], float]:
