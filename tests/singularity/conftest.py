@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import anyio.lowlevel
 import pytest
 from inspect_ai.util import ExecResult
 
 from domyn_inspect.sandboxes.singularity import environment as env_mod
+from domyn_inspect.sandboxes.singularity import images as images_mod
 
 
 def ok(stdout: str = "", stderr: str = "") -> ExecResult[str]:
@@ -86,6 +88,52 @@ def overlay_dir(tmp_path, monkeypatch) -> Path:
 def no_memory_limit(monkeypatch) -> None:
     """Exec argv is unwrapped unless a test sets ``INSPECT_SINGULARITY_MEMORY_LIMIT_MB`` (it may come from ``.env``)."""
     monkeypatch.delenv("INSPECT_SINGULARITY_MEMORY_LIMIT_MB", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_build_env(monkeypatch) -> None:
+    """Builds run unwrapped and pulls/builds are not forced unless a test says so (these may come from ``.env``).
+
+    A launcher left in place (e.g. ``srun ...``) would break the argv checks, or submit a real job if a fake is missing.
+    """
+    for name in (
+        "INSPECT_SINGULARITY_BUILD_LAUNCHER",
+        "INSPECT_SINGULARITY_BUILD_ARGS",
+        "INSPECT_SINGULARITY_SIF_REFRESH",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+class FakeBuild:
+    """Records every faked build command and replays canned results (then ``ok()``).
+
+    ``ensure_built`` runs inspect's ``subprocess`` directly, not ``environment._run``, since a launcher goes before
+    ``singularity``. A successful build writes the ``.sif`` it was asked for (the argv's second-to-last item).
+    """
+
+    def __init__(self, results=None) -> None:
+        self.calls: list[list[str]] = []
+        self._results = list(results or [])
+
+    async def run(self, cmd, **kwargs) -> ExecResult[str]:  # noqa: ARG002
+        self.calls.append(list(cmd))
+        await anyio.lowlevel.checkpoint()  # let concurrent callers interleave, as a real build would
+        result = self._results.pop(0) if self._results else ok()
+        if result.success:
+            Path(cmd[-2]).write_text("built sif")
+        return result
+
+
+@pytest.fixture
+def fake_build(monkeypatch):
+    """Factory installing a :class:`FakeBuild` over ``images.subprocess``."""
+
+    def install(results=None) -> FakeBuild:
+        fake = FakeBuild(results)
+        monkeypatch.setattr(images_mod, "subprocess", fake.run)
+        return fake
+
+    return install
 
 
 @pytest.fixture

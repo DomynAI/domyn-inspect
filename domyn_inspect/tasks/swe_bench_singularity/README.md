@@ -9,6 +9,6 @@ from its DockerHub image. Images are cached as `.sif` in `$INSPECT_SINGULARITY_S
 downloading the images or encountering delays during the evaluation.
 
 ```bash
-uv run -m custom.swe_bench_singularity.swe_bench_singularity --jobs 6 2>&1 | tee -a swebench_sif_pull.log
+uv run -m domyn_inspect.tasks.swe_bench_singularity.swe_bench_singularity --jobs 6 2>&1 | tee -a swebench_sif_pull.log
 ```
 while being sure to set the right folder for `$INSPECT_SINGULARITY_SIF_DIR`.

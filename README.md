@@ -279,6 +279,12 @@ Each task is built once online, which caches its dataset, then again with the Hu
 compute node. The script exits 1 if any task fails either pass, so a job is not submitted only to fail later. Assets a
 task fetches while it runs, rather than when it is built, are not covered.
 
+This includes Singularity images. A task that builds its image when it is built (`scicode_singularity`, and
+`livecodebench`)
+gets it built by the prefetch. An image the sandbox pulls when the run starts (`image="docker://..."`) does not: pull it
+beforehand into the `INSPECT_SINGULARITY_SIF_DIR` the job will use (e.g. `bigcodebench_singularity`,
+`swe_bench_singularity`, whose READMEs show how).
+
 ---
 
 ## Viewing results

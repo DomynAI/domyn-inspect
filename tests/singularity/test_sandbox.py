@@ -208,6 +208,124 @@ class TestImages:
         assert len(pulls) == 1, f"expected one pull, got {len(pulls)}"
 
 
+# ── image build from a .def + stamp ───────────────────────────────────────
+@pytest.fixture
+def def_file(tmp_path) -> Path:
+    path = tmp_path / "box.def"
+    path.write_text("Bootstrap: docker\nFrom: alpine:3.20\n")
+    return path
+
+
+def _stamp(sif: Path) -> Path:
+    return sif.with_name(sif.name + ".build_stamp")
+
+
+@pytest.mark.anyio
+class TestBuild:
+    async def test_first_build_argv_atomic_publish_and_stamp(self, sif_cache, fake_build, def_file):
+        fake = fake_build()
+        path = await images.ensure_built(def_file)
+
+        assert path == sif_cache / "box.sif"
+        assert path.read_text() == "built sif"
+        argv = fake.calls[0]
+        assert argv[:2] == [env_mod.SINGULARITY_COMMAND, "build"]
+        assert argv[-1] == str(def_file)
+        assert ".partial" in argv[-2], "must stage through a temp name"
+        assert _stamp(path).read_text() == images._def_digest(def_file)
+        assert not list(sif_cache.glob("*.partial*")), "temp file must not survive"
+
+    @pytest.mark.usefixtures("sif_cache")
+    async def test_matching_stamp_skips_the_build(self, fake_build, def_file):
+        fake = fake_build()
+        path = await images.ensure_built(def_file)
+        assert await images.ensure_built(def_file) == path
+        assert len(fake.calls) == 1, f"should not have rebuilt; ran {fake.calls}"
+
+    @pytest.mark.usefixtures("sif_cache")
+    async def test_edited_def_rebuilds_and_restamps(self, fake_build, def_file):
+        fake = fake_build()
+        path = await images.ensure_built(def_file)
+        old_stamp = _stamp(path).read_text()
+
+        def_file.write_text(def_file.read_text() + "%post\n    echo changed\n")
+        await images.ensure_built(def_file)
+
+        assert len(fake.calls) == 2
+        assert _stamp(path).read_text() == images._def_digest(def_file) != old_stamp
+
+    async def test_sif_without_stamp_is_trusted_with_a_warning(self, sif_cache, fake_build, def_file, caplog):
+        """A .sif built by hand (e.g. in a Slurm job) has no stamp: use it rather than rebuild it."""
+        fake = fake_build()
+        sif_cache.mkdir(parents=True, exist_ok=True)
+        (sif_cache / "box.sif").write_text("hand built")
+
+        path = await images.ensure_built(def_file)
+
+        assert fake.calls == []
+        assert path.read_text() == "hand built"
+        assert "no build stamp" in caplog.text
+
+    @pytest.mark.usefixtures("sif_cache")
+    async def test_refresh_env_forces_a_rebuild(self, fake_build, def_file, monkeypatch):
+        fake = fake_build()
+        await images.ensure_built(def_file)
+        monkeypatch.setenv(images.ENV_REFRESH, "1")
+        await images.ensure_built(def_file)
+        assert len(fake.calls) == 2
+
+    async def test_failed_build_raises_and_keeps_the_previous_image(self, sif_cache, fake_build, def_file):
+        """Neither a half-built .sif nor a stamp for one may be left behind."""
+        fake_build([ok(), fail(returncode=255, stderr="FATAL: no space left")])
+        path = await images.ensure_built(def_file)
+        old_stamp = _stamp(path).read_text()
+
+        def_file.write_text(def_file.read_text() + "# edited\n")
+        with pytest.raises(RuntimeError, match="no space left"):
+            await images.ensure_built(def_file)
+
+        assert path.read_text() == "built sif"
+        assert _stamp(path).read_text() == old_stamp
+        assert not list(sif_cache.glob("*.partial*"))
+
+    async def test_failed_first_build_leaves_nothing(self, sif_cache, fake_build, def_file):
+        fake_build([fail(stderr="network down")])
+        with pytest.raises(RuntimeError, match="network down"):
+            await images.ensure_built(def_file)
+        assert not (sif_cache / "box.sif").exists()
+        assert not _stamp(sif_cache / "box.sif").exists()
+        assert not list(sif_cache.glob("*.partial*"))
+
+    @pytest.mark.usefixtures("sif_cache")
+    async def test_launcher_and_build_args_wrap_the_command(self, fake_build, def_file, monkeypatch):
+        monkeypatch.setenv(images.ENV_BUILD_LAUNCHER, "srun -p serial --time=01:00:00 env SINGULARITY_TMPDIR=/tmp")
+        monkeypatch.setenv(images.ENV_BUILD_ARGS, "--fakeroot --force")
+        fake = fake_build()
+        await images.ensure_built(def_file)
+
+        argv = fake.calls[0]
+        assert argv[:5] == ["srun", "-p", "serial", "--time=01:00:00", "env"]
+        assert argv[5:10] == ["SINGULARITY_TMPDIR=/tmp", env_mod.SINGULARITY_COMMAND, "build", "--fakeroot", "--force"]
+        assert argv[-1] == str(def_file)
+
+    async def test_given_sif_path_is_used_as_is(self, tmp_path, fake_build, def_file):
+        fake_build()
+        target = tmp_path / "chosen" / "my.image"
+        target.parent.mkdir()
+        assert await images.ensure_built(def_file, target) == target
+        assert target.read_text() == "built sif"
+        assert _stamp(target).exists()
+
+    @pytest.mark.usefixtures("sif_cache")
+    async def test_concurrent_builds_of_one_def_happen_once(self, fake_build, def_file):
+        """Like pulls: the per-image lock plus the under-lock re-check collapse duplicate builds."""
+        fake = fake_build()
+        async with anyio.create_task_group() as tg:
+            for _ in range(4):
+                tg.start_soon(images.ensure_built, def_file)
+        assert len(fake.calls) == 1, f"expected one build, got {len(fake.calls)}"
+
+
 # ── exec ──────────────────────────────────────────────────────────────────
 @pytest.mark.anyio
 class TestExec:

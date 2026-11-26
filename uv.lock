@@ -819,6 +819,7 @@ dependencies = [
     { name = "ifstruct" },
     { name = "inspect-ai" },
     { name = "inspect-evals", extra = ["agentdojo", "scicode", "swe-bench"] },
+    { name = "inspect-harbor" },
     { name = "instruction-following-eval" },
     { name = "jinja2" },
     { name = "jiter" },
@@ -864,6 +865,7 @@ requires-dist = [
     { name = "inspect-ai", specifier = "~=0.3.0" },
     { name = "inspect-evals", extras = ["cybench"], marker = "extra == 'cyber'", specifier = "==0.22.0" },
     { name = "inspect-evals", extras = ["swe-bench", "agentdojo", "scicode"], specifier = "==0.22.0" },
+    { name = "inspect-harbor", specifier = ">=1.0.0" },
     { name = "instruction-following-eval", git = "https://github.com/josejg/instruction_following_eval.git" },
     { name = "jinja2" },
     { name = "jiter" },
@@ -1308,8 +1310,8 @@ name = "httpcore2"
 version = "2.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c0/61/afa9d6b7452f9eca73f73d45324eb0bb52f098fd5e6049bf6b8263be9b4e/httpcore2-2.16.0.tar.gz", hash = "sha256:c72cd0413563b17e1cd8354677dff887466f8ec2551679759e93126534428643", size = 69886, upload-time = "2026-10-21T07:09:45.31Z" }
 wheels = [
@@ -1599,6 +1601,23 @@ swe-bench = [
     { name = "docker" },
     { name = "jsonlines" },
     { name = "swebench" },
+]
+
+[[package]]
+name = "inspect-harbor"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "inspect-ai" },
+    { name = "packaging" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "tenacity" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5d/5c/7e7b50aad657d9d6721624a02620bf0244ea0c8b8188dcb8bf4253c34cc2/inspect_harbor-1.0.0.tar.gz", hash = "sha256:7b788e06b5382baec335d723a1061fe229159e1cde1933d046025cc4d178618b", size = 62381, upload-time = "2026-09-23T14:32:17.845Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b0/b6/575dec5da4f483468f67ef0177417976fadce538423c3b4848590da41438/inspect_harbor-1.0.0-py3-none-any.whl", hash = "sha256:669deb618c5e8dff13a66f08bfc25c3d3104e6741e56c52c471ea80a8b82abf3", size = 68139, upload-time = "2026-09-23T14:32:16.501Z" },
 ]
 
 [[package]]
