@@ -1,6 +1,7 @@
 """ifbench (custom/ifbench/)."""
 
 import asyncio
+import importlib
 
 import pytest
 from inspect_ai import eval as inspect_eval
@@ -137,3 +138,40 @@ def test_pass_k_scores_prompt_level_pass_at_k(tmp_path):
     for key in ("prompt_level_strict", "prompt_level_loose"):
         assert metrics[(key, "pass_at_1")] == 0.5
         assert metrics[(key, "pass_at_2")] == 1.0
+
+
+def test_missing_nltk_data_raises_instead_of_failing_samples(monkeypatch):
+    """nltk.download fails quietly offline; scoring must not then run with checkers that error on some samples."""
+    ifbench_module = importlib.import_module("domyn_inspect.tasks.ifbench.ifbench")
+
+    downloads = []
+    present = {"tokenizers/punkt", "tokenizers/punkt_tab"}
+
+    def find(resource):
+        if resource not in present:
+            raise LookupError(resource)
+
+    monkeypatch.setattr(ifbench_module.nltk.data, "find", find)
+    monkeypatch.setattr(ifbench_module.nltk, "download", lambda pkg, **_: downloads.append(pkg) or False)
+
+    with pytest.raises(RuntimeError, match="stopwords, averaged_perceptron_tagger_eng"):
+        ifbench_module.ensure_nltk_resources()
+    assert downloads == ["stopwords", "averaged_perceptron_tagger_eng"]
+
+
+def test_nltk_data_downloaded_on_demand_is_accepted(monkeypatch):
+    ifbench_module = importlib.import_module("domyn_inspect.tasks.ifbench.ifbench")
+
+    present = {"tokenizers/punkt", "tokenizers/punkt_tab", "corpora/stopwords"}
+
+    def find(resource):
+        if resource not in present:
+            raise LookupError(resource)
+
+    def download(pkg, **_):
+        present.add(ifbench_module.NLTK_PACKAGES[pkg])
+        return True
+
+    monkeypatch.setattr(ifbench_module.nltk.data, "find", find)
+    monkeypatch.setattr(ifbench_module.nltk, "download", download)
+    ifbench_module.ensure_nltk_resources()
