@@ -6,8 +6,9 @@
 https://github.com/allenai/IFBench — 300 prompts, each with one or more of 58 verifiable constraints, graded by
 rule-based checkers. The checkers are upstream's ``ifbench`` package, installed from git at commit 1c40f0c (see
 ``pyproject.toml``); ``ifbench_lib/evaluation_lib.py`` is upstream's strict/loose scoring (see
-``ifbench_lib/README.md``). Importing ``ifbench`` downloads any missing NLTK data, which fails on an offline node, so
-``NLTK_DATA_DIR`` is put on ``nltk.data.path`` first; ``setup/prefetch_datasets.py --tasks`` fills it beforehand.
+``ifbench_lib/README.md``). Importing ``ifbench`` downloads any missing NLTK data, which fails silently on an offline
+node, so ``NLTK_DATA_DIR`` is put on ``nltk.data.path`` first and building the scorer raises if any is still missing;
+``python -m domyn_inspect.prefetch.prefetch_datasets --tasks`` fills it beforehand.
 
 Reports upstream's four numbers (prompt/instruction level, strict/loose), through IFEval's ``if_metric`` since the
 per-sample score has IFEval's shape. The dataset is HF ``allenai/IFBench_test``. An errored or empty response counts
@@ -102,16 +103,34 @@ def record_to_sample(record: dict[str, Any]) -> Sample:
     )
 
 
-def ensure_nltk_resources() -> None:
-    """Make the checkers' NLTK data findable, downloading what is missing into NLTK_DATA_DIR (online only)."""
-    nltk_dir = str(NLTK_DATA_DIR.resolve())
-    if nltk_dir not in nltk.data.path:
-        nltk.data.path.append(nltk_dir)
+def _missing_nltk_packages() -> list[str]:
+    missing = []
     for pkg, resource in NLTK_PACKAGES.items():
         try:
             nltk.data.find(resource)
         except LookupError:
-            nltk.download(pkg, download_dir=nltk_dir, quiet=True)
+            missing.append(pkg)
+    return missing
+
+
+def ensure_nltk_resources() -> None:
+    """Make the checkers' NLTK data findable, downloading what is missing into NLTK_DATA_DIR (online only).
+
+    Raises if any is still missing: ``nltk.download`` fails quietly offline, and the checkers would then error on
+    the samples that need it, scoring the task over fewer samples.
+    """
+    nltk_dir = str(NLTK_DATA_DIR.resolve())
+    if nltk_dir not in nltk.data.path:
+        nltk.data.path.append(nltk_dir)
+    for pkg in _missing_nltk_packages():
+        nltk.download(pkg, download_dir=nltk_dir, quiet=True)
+    if missing := _missing_nltk_packages():
+        msg = (
+            f"IFBench's NLTK data is missing ({', '.join(missing)}) and could not be downloaded. On a node with "
+            f"internet access, run `python -m domyn_inspect.prefetch.prefetch_datasets --tasks <tasks.toml>` or "
+            f"`python -m nltk.downloader -d {nltk_dir} {' '.join(missing)}`."
+        )
+        raise RuntimeError(msg)
 
 
 @scorer(metrics=[if_metric()])
